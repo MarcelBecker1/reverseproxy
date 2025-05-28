@@ -8,13 +8,13 @@ import (
 )
 
 func main() {
-	fmt.Println("Starting Server")
+	fmt.Println("Starting Reverse Proxy")
 	server := proxy.New(&proxy.Config{
 		Host: "localhost",
 		Port: 8080,
 	})
 
 	if err := server.Start(); err != nil {
-		log.Fatal("Failed to Start server:", err)
+		log.Fatal("failed to Start server:", err)
 	}
 }
