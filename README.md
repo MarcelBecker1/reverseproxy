@@ -25,6 +25,8 @@ Need simulation to test it
 ## What i want to figure out
 
 - Do we actual need one Server and then seperate smaller game entities? GameServers in normal servers doesn't really make sense
+- Do we have proxy then the matchmaking servers (multiple), proxy keeps track of matchmaking servers and matchmaking servers have game servers
+-> isnt that just 2 reverse proxies with load balancing?
 
 
 ## Start with
