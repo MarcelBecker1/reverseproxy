@@ -2,10 +2,11 @@ package proxy
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
-	"os"
 	"sync"
+
+	"github.com/MarcelBecker1/reverseproxy/internal/logger"
 )
 
 // Can check that we listen on port with netstat -ano | findstr ":8080"
@@ -15,7 +16,6 @@ import (
 type ProxyServer struct {
 	host        string
 	port        string
-	logger      *log.Logger
 	connections int
 	mu          sync.Mutex
 }
@@ -26,17 +26,17 @@ type Config struct {
 }
 
 func New(conf *Config) *ProxyServer {
+	logger.NewWithComponent("proxy")
 	return &ProxyServer{
 		host:        conf.Host,
 		port:        conf.Port,
-		logger:      log.New(os.Stdout, "[PROXY]  ", log.LstdFlags),
 		connections: 0,
 	}
 }
 
 func (p *ProxyServer) Start(errorC chan error) {
 	hostAdress := net.JoinHostPort(p.host, p.port)
-	p.logger.Printf("listening on %s", hostAdress)
+	slog.Info("listening for tcp connections", "address", hostAdress)
 
 	listener, err := net.Listen("tcp", hostAdress)
 	if err != nil {
@@ -52,7 +52,7 @@ func (p *ProxyServer) Start(errorC chan error) {
 			select {
 			case errorC <- fmt.Errorf("failed to accept connection: %w", err):
 			default:
-				p.logger.Printf("warning: connection error but no receiver reading: %v", err)
+				slog.Warn("connection error but no receiver reading", "error", err)
 			}
 			continue
 		}
@@ -70,5 +70,5 @@ func (p *ProxyServer) incConnections() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.connections++
-	p.logger.Printf("current connection count: %d", p.connections)
+	slog.Info("connection count increased", "connections", p.connections)
 }

@@ -2,14 +2,18 @@ package client
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
-	"os"
+
+	"github.com/MarcelBecker1/reverseproxy/internal/logger"
 )
 
+/*
+TODO: Need a way to authenticate to the proxy server
+*/
+
 type Client struct {
-	name   string
-	logger *log.Logger
+	name string
 }
 
 type Config struct {
@@ -17,17 +21,17 @@ type Config struct {
 }
 
 func New(conf *Config) *Client {
+	logger.NewWithComponent("client")
 	return &Client{
-		name:   conf.Name,
-		logger: log.New(os.Stdout, "[CLIENT] ", log.LstdFlags),
+		name: conf.Name,
 	}
 }
 
 func (c *Client) Connect(host, port string, errorC chan error) {
-	hostAdress := net.JoinHostPort(host, port)
-	c.logger.Printf("connecting client to %s", hostAdress)
+	address := net.JoinHostPort(host, port)
+	slog.Info("connecting client", "address", address)
 
-	conn, err := net.Dial("tcp", hostAdress)
+	conn, err := net.Dial("tcp", address)
 	if err != nil {
 		errorC <- fmt.Errorf("error connecting to server %w", err)
 		return
@@ -35,5 +39,5 @@ func (c *Client) Connect(host, port string, errorC chan error) {
 	defer conn.Close()
 	errorC <- nil
 
-	c.logger.Printf("connected client to server")
+	slog.Info("connected client to server")
 }

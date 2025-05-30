@@ -2,22 +2,26 @@
 
 ## General
 
-Client -> Reverse Proxy -> Server for matchmaking -> GameServer (actual resources)
+Client -> Reverse Proxy -> GameServer (actual resources)
 
 Client authenticates to proxy
 
-Proxy finds server or starts new one
+Proxy finds server or starts new one (server selection)
 
 Proxy forwards auth
 
 Server can send stuff (config) back to client via proxy
 
+Connection can be closed from both sides
+
 ## Stuff to consider
 
 - TCP connections (handshake, packet format)
+    - Framing of messages as we want to use raw tcp
 - Filter bad actors (can be filtered by rules, but for now maybe just allow all)
 - Authentication (probably also allow everyone for now)
 - Server assignments
+    - How do we keep track of servers? SQLite? Something simpler?
 - What if Client closes connection -> Server should close connection
 
 Need simulation to test it
@@ -31,8 +35,10 @@ Need simulation to test it
 
 ## Start with
 - Just simple connection TCP (socket) client server with TCP 
-- add new server (process for simulation) that has db, some config
-- forward data to server through proxy
+- Auth for clients
+- forward data to game server and send data back (some config)
+    - probably difficult as it required packet framing
+- database on proxy
 
 ## What are we tackeling
 - Load balancing
