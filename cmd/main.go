@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/MarcelBecker1/reverseproxy/internal/client"
 	"github.com/MarcelBecker1/reverseproxy/internal/logger"
@@ -14,6 +15,8 @@ import (
 func main() {
 	const host string = "localhost"
 	const port string = "8080"
+	const maxSeconds int8 = 30
+	const deadline = time.Duration(maxSeconds) * time.Second
 
 	prettyLogger := slog.New(logger.NewHandler(&slog.HandlerOptions{
 		Level: slog.LevelDebug,
@@ -29,8 +32,9 @@ func main() {
 
 	slog.Info("starting reverse proxy")
 	server := proxy.New(&proxy.Config{
-		Host: host,
-		Port: port,
+		Host:     host,
+		Port:     port,
+		Deadline: deadline,
 	})
 
 	serverChan := make(chan error)
