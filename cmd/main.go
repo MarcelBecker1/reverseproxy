@@ -12,6 +12,8 @@ import (
 	"github.com/MarcelBecker1/reverseproxy/internal/proxy"
 )
 
+var log *slog.Logger
+
 func main() {
 	const host string = "localhost"
 	const port string = "8080"
@@ -22,7 +24,8 @@ func main() {
 		Level: slog.LevelDebug,
 	}))
 	slog.SetDefault(prettyLogger)
-	logger.NewWithComponent("main")
+
+	log = logger.NewWithComponent("main")
 
 	// Currently we create simple channel for os interrupts with buffer size 1, thus we are blocking the main thread after starting
 	// the goroutines until we get the interrupt and can finish gracefully
@@ -30,7 +33,7 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	slog.Info("starting reverse proxy")
+	log.Info("starting reverse proxy")
 	server := proxy.New(&proxy.Config{
 		Host:     host,
 		Port:     port,
@@ -41,13 +44,13 @@ func main() {
 	go server.Start(serverChan)
 
 	if err := <-serverChan; err != nil {
-		slog.Error("failed to start server", "error", err)
+		log.Error("failed to start server", "error", err)
 		os.Exit(1)
 	}
 
 	go func() {
 		for err := range serverChan {
-			slog.Error("server error", "error", err)
+			log.Error("server error", "error", err)
 		}
 	}()
 
@@ -59,9 +62,9 @@ func main() {
 	go client.Connect(host, port, clientChan)
 
 	if err := <-clientChan; err != nil {
-		slog.Error("failed to connect client to server", "error", err)
+		log.Error("failed to connect client to server", "error", err)
 	}
 
 	sig := <-sigChan
-	slog.Info("received signal shutting down", "signal", sig)
+	log.Info("received signal shutting down", "signal", sig)
 }

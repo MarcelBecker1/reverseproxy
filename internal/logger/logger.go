@@ -16,6 +16,7 @@ const (
 
 	red        = 31
 	yellow     = 33
+	magenta    = 35
 	cyan       = 36
 	darkGray   = 90
 	lightGreen = 92
@@ -23,6 +24,8 @@ const (
 
 	timeFormat      = "[15:04:05.000]"
 	maxInlineFields = 5
+
+	componentWidth = 6 // just set to the largest component
 )
 
 func colorize(colorCode int, v string) string {
@@ -66,6 +69,13 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 		return err
 	}
 
+	component := ""
+	if comp, ok := attrs["component"]; ok {
+		componentName := strings.ToUpper(comp.(string))
+		component = fmt.Sprintf("%-*s", componentWidth, componentName)
+		delete(attrs, "component")
+	}
+
 	if len(attrs) <= maxInlineFields {
 		var attrStr string
 		// Single line format
@@ -81,6 +91,7 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 
 		fmt.Println(
 			colorize(white, r.Time.Format(timeFormat)),
+			colorize(magenta, component),
 			level,
 			colorize(white, r.Message),
 			colorize(darkGray, attrStr),
@@ -94,6 +105,7 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 
 		fmt.Println(
 			colorize(white, r.Time.Format(timeFormat)),
+			colorize(magenta, component),
 			level,
 			colorize(white, r.Message),
 			colorize(darkGray, string(bytes)),

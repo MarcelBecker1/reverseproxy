@@ -14,6 +14,8 @@ import (
 
 // Should use raw tcp socket connections
 
+var log *slog.Logger
+
 type ProxyServer struct {
 	host        string
 	port        string
@@ -29,7 +31,7 @@ type Config struct {
 }
 
 func New(conf *Config) *ProxyServer {
-	logger.NewWithComponent("proxy")
+	log = logger.NewWithComponent("proxy")
 	return &ProxyServer{
 		host:        conf.Host,
 		port:        conf.Port,
@@ -40,7 +42,7 @@ func New(conf *Config) *ProxyServer {
 
 func (p *ProxyServer) Start(errorC chan error) {
 	hostAdress := net.JoinHostPort(p.host, p.port)
-	slog.Info("listening for tcp connections", "address", hostAdress)
+	log.Info("listening for tcp connections", "address", hostAdress)
 
 	listener, err := net.Listen("tcp", hostAdress)
 	if err != nil {
@@ -56,7 +58,7 @@ func (p *ProxyServer) Start(errorC chan error) {
 			select {
 			case errorC <- fmt.Errorf("failed to accept connection: %w", err):
 			default:
-				slog.Warn("connection error but no receiver reading", "error", err)
+				log.Warn("connection error but no receiver reading", "error", err)
 			}
 			continue
 		}
@@ -72,22 +74,31 @@ func (p *ProxyServer) handleConnection(conn net.Conn) {
 
 	for {
 		if err := conn.SetReadDeadline(time.Now().Add(p.deadline)); err != nil {
-			slog.Error("failed to set read deadline", "error", err)
+			log.Error("failed to set read deadline", "error", err)
 			return
 		}
+
 		n, err := conn.Read(buffer)
 		if err != nil {
-			slog.Error("failed to read from connection", "error", err)
+			if err.Error() == "EOF" {
+				log.Info("client disconnected")
+				return
+			}
+			log.Error("failed to read from connection", "error", err)
 			return
 		}
-		slog.Info("received data", "bytes", n)
-	}
 
+		data := string(buffer[:n])
+		log.Info("received data",
+			"bytes", n,
+			"data", data,
+		)
+	}
 }
 
 func (p *ProxyServer) incConnections() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.connections++
-	slog.Info("connection count increased", "connections", p.connections)
+	log.Info("connection count increased", "connections", p.connections)
 }
