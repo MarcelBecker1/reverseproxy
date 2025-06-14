@@ -32,6 +32,11 @@ func colorize(colorCode int, v string) string {
 	return fmt.Sprintf("\033[%sm%s%s", strconv.Itoa(colorCode), v, reset)
 }
 
+type orderedAttr struct {
+	Key   string
+	Value any
+}
+
 type Handler struct {
 	h slog.Handler
 	b *bytes.Buffer
@@ -64,25 +69,21 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 		level = colorize(red, level)
 	}
 
-	attrs, err := h.computeAttrs(ctx, r)
+	attrs, componentName, err := h.computeAttrs(ctx, r)
 	if err != nil {
 		return err
 	}
 
-	component := ""
-	if comp, ok := attrs["component"]; ok {
-		componentName := strings.ToUpper(comp.(string))
-		component = fmt.Sprintf("%-*s", componentWidth, componentName)
-		delete(attrs, "component")
-	}
+	component := fmt.Sprintf("%-*s", componentWidth, strings.ToUpper(componentName))
 
 	if len(attrs) <= maxInlineFields {
 		var attrStr string
 		// Single line format
 		pairs := make([]string, 0, len(attrs))
-		for k, v := range attrs {
-			pairs = append(pairs, fmt.Sprintf("\"%s\": \"%v\"", k, v))
+		for _, attr := range attrs {
+			pairs = append(pairs, fmt.Sprintf("\"%s\": \"%v\"", attr.Key, attr.Value))
 		}
+
 		if len(pairs) > 0 {
 			attrStr = fmt.Sprintf("{ %s }", strings.Join(pairs, " "))
 		} else {
@@ -98,7 +99,12 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 		)
 	} else {
 		// Multi-line format for many fields
-		bytes, err := json.MarshalIndent(attrs, "", " ")
+		orderedMap := make(map[string]any)
+		for _, attr := range attrs {
+			orderedMap[attr.Key] = attr.Value
+		}
+
+		bytes, err := json.MarshalIndent(orderedMap, "", " ")
 		if err != nil {
 			return fmt.Errorf("error when marshaling attrs: %w", err)
 		}
@@ -118,22 +124,35 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 func (h *Handler) computeAttrs(
 	ctx context.Context,
 	r slog.Record,
-) (map[string]any, error) {
+) ([]orderedAttr, string, error) {
 	h.m.Lock()
 	defer func() {
 		h.b.Reset()
 		h.m.Unlock()
 	}()
 	if err := h.h.Handle(ctx, r); err != nil {
-		return nil, fmt.Errorf("error when calling inner handler's Handle: %w", err)
+		return nil, "", fmt.Errorf("error when calling inner handler's Handle: %w", err)
 	}
 
-	var attrs map[string]any
-	err := json.Unmarshal(h.b.Bytes(), &attrs)
+	var mapAttrs map[string]any
+	err := json.Unmarshal(h.b.Bytes(), &mapAttrs)
 	if err != nil {
-		return nil, fmt.Errorf("error when unmarshaling inner handler's Handle result: %w", err)
+		return nil, "", fmt.Errorf("error when unmarshaling inner handler's Handle result: %w", err)
 	}
-	return attrs, nil
+
+	component, _ := mapAttrs["component"].(string)
+	attrs := make([]orderedAttr, 0)
+	r.Attrs(func(a slog.Attr) bool {
+		if a.Key != "component" {
+			attrs = append(attrs, orderedAttr{
+				Key:   a.Key,
+				Value: mapAttrs[a.Key],
+			})
+		}
+		return true
+	})
+
+	return attrs, component, nil
 }
 
 func NewHandler(opts *slog.HandlerOptions) *Handler {

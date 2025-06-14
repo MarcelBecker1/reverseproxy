@@ -2,11 +2,13 @@ package proxy
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"sync"
 	"time"
 
+	"github.com/MarcelBecker1/reverseproxy/internal/framing"
 	"github.com/MarcelBecker1/reverseproxy/internal/logger"
 )
 
@@ -70,17 +72,15 @@ func (p *ProxyServer) handleConnection(conn net.Conn) {
 	defer conn.Close()
 	p.incConnections()
 
-	buffer := make([]byte, 1024) // Idk yet about the size, do we want to take something larger?
-
 	for {
-		if err := conn.SetReadDeadline(time.Now().Add(p.deadline)); err != nil {
+		if err := conn.SetReadDeadline(time.Now().Add(p.deadline)); err != nil { // Do we even need the timeout?
 			log.Error("failed to set read deadline", "error", err)
 			return
 		}
 
-		n, err := conn.Read(buffer)
+		msg, length, err := framing.ReadMessage(conn, log)
 		if err != nil {
-			if err.Error() == "EOF" {
+			if err == io.EOF {
 				log.Info("client disconnected")
 				return
 			}
@@ -88,10 +88,9 @@ func (p *ProxyServer) handleConnection(conn net.Conn) {
 			return
 		}
 
-		data := string(buffer[:n])
 		log.Info("received data",
-			"bytes", n,
-			"data", data,
+			"bytes", length,
+			"data", msg,
 		)
 	}
 }

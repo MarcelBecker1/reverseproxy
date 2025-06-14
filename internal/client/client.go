@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net"
 
+	"github.com/MarcelBecker1/reverseproxy/internal/framing"
 	"github.com/MarcelBecker1/reverseproxy/internal/logger"
 )
 
@@ -53,18 +54,16 @@ func (c *Client) Connect(host, port string, errorC chan error) {
 	c.Send(conn, dummyMessage)
 	c.Send(conn, largeDummyMessage+largeDummyMessage)
 
-	log.Info("connected client to server")
+	log.Info("finished sending - closing connection")
 }
 
-func (c *Client) Send(conn net.Conn, msg string) {
+func (c *Client) Send(conn net.Conn, msg string) error {
 	// deadline := time.Duration(10) * time.Second
 	// conn.SetWriteDeadline(time.Now().Add(deadline))
 
-	buff := []byte(msg)
-	n, err := conn.Write(buff)
+	err := framing.SendMessage(conn, msg, log)
 	if err != nil {
-		log.Error("error sending data", "error", err)
+		return err
 	}
-
-	log.Info("send data to server", "bytes", n)
+	return nil
 }
