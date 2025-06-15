@@ -10,7 +10,12 @@ import (
 )
 
 /*
-TODO: Need a way to authenticate to the proxy server
+	TODO:
+		1. first send message with auth from client to server
+		2. then wait for response
+		3. then send more data
+
+		General: Need simulation to test properly
 */
 
 var log *slog.Logger

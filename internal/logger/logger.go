@@ -25,7 +25,7 @@ const (
 	timeFormat      = "[15:04:05.000]"
 	maxInlineFields = 5
 
-	componentWidth = 6 // just set to the largest component
+	componentWidth = 10 // just set to the largest component
 )
 
 func colorize(colorCode int, v string) string {
