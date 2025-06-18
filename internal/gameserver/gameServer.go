@@ -72,7 +72,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 	for {
 		// we are not setting read deadling atm, maybe change? -> be consistent
-		msg, length, err := framing.ReadMessage(conn, log)
+		msg, bytes, err := framing.ReadMessage(conn, log)
 		if err != nil {
 			if err == io.EOF {
 				log.Info("client disconnected")
@@ -84,7 +84,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 
 		log.Info("received data",
-			"bytes", length,
+			"bytes", bytes,
 			"data", msg,
 		)
 	}

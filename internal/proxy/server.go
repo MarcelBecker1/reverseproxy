@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,10 +33,14 @@ import (
 
 	What we need here:
 		- Bidirectional data flow, now we only get data from client and forward to gs but we need to also receive from gs and forward to client as mitm
+
+
+	Does it make sense to switch to all tcp functions net functions?
 */
 
 const (
-	defaultCap uint8 = 10
+	defaultCap uint8  = 10
+	maxGsPort  uint16 = 9000
 )
 
 var log *slog.Logger
@@ -134,7 +139,7 @@ func (p *ProxyServer) handleConnection(conn net.Conn) {
 			return
 		}
 
-		msg, length, err := framing.ReadMessage(conn, log)
+		msg, bytes, err := framing.ReadMessage(conn, log)
 		if err != nil {
 			if err == io.EOF {
 				log.Info("client disconnected")
@@ -145,7 +150,7 @@ func (p *ProxyServer) handleConnection(conn net.Conn) {
 		}
 
 		log.Info("received data",
-			"bytes", length,
+			"bytes", bytes,
 			"data", msg,
 		)
 
@@ -196,7 +201,7 @@ func (p *ProxyServer) findAvailableGameServer() *GameServerInfo {
 
 func (p *ProxyServer) startNewGameServer() (*GameServerInfo, error) {
 	cap := defaultCap
-	port, err := getFreePort()
+	port, err := getFreePort(p.host, p.port)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get free port: %w", err)
 	}
@@ -237,6 +242,7 @@ func (p *ProxyServer) handleAuth(c *ClientInfo, msg string) error {
 		return framing.SendMessage(c.conn, "AUTH_OK", log)
 	}
 
+	log.Warn("auth failed", "client", c.id)
 	return framing.SendMessage(c.conn, "AUTH_FAILED", log)
 }
 
@@ -260,20 +266,26 @@ func (gs *GameServerInfo) hasCapacity() bool {
 	return gs.connections < gs.capacity
 }
 
-// TODO: Do i want to switch in general to all tcp functions?
-func getFreePort() (string, error) {
-	addr, err := net.ResolveTCPAddr("tcp", "localhost:8000")
+func getFreePort(host, port string) (string, error) {
+	startPort, err := strconv.Atoi(port)
 	if err != nil {
 		return "", err
 	}
 
-	l, err := net.ListenTCP("tcp", addr)
-	if err != nil {
-		return "", err
-	}
-	defer l.Close()
+	for p := startPort + 1; p <= int(maxGsPort); p++ {
+		addr := net.JoinHostPort(host, strconv.Itoa(p))
 
-	return fmt.Sprintf("%d", l.Addr().(*net.TCPAddr).Port), nil
+		l, err := net.Listen("tcp", addr)
+		if err != nil {
+			continue
+		}
+		defer l.Close()
+
+		port := fmt.Sprintf("%d", l.Addr().(*net.TCPAddr).Port)
+		log.Info("found port", "port", port)
+		return port, nil
+	}
+	return "", fmt.Errorf("no port available in the range %d to %d", startPort, maxGsPort)
 }
 
 // I need to keep track of the clients that are connected and the gameservers

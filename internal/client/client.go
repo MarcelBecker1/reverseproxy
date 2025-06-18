@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 
@@ -47,6 +48,11 @@ func (c *Client) Connect(host, port string, errorC chan error) {
 	defer conn.Close()
 	errorC <- nil
 
+	if err := c.auth(conn); err != nil {
+		errorC <- fmt.Errorf("auth error %w", err)
+		return
+	}
+
 	dummyMessage := "[1] This is a client and i want to send some message. "
 	dummyMessage2 := "[2] Second smaller message, which will be combined with the first. "
 	largeDummyMessage := "[3] This is a client and i want to send some message, but this is a large message that should be split into multiple packets. " +
@@ -60,6 +66,32 @@ func (c *Client) Connect(host, port string, errorC chan error) {
 	c.Send(conn, largeDummyMessage+largeDummyMessage)
 
 	log.Info("finished sending - closing connection")
+}
+
+func (c *Client) auth(conn net.Conn) error {
+	authString := "testUser:testPassword" // dont really want to auth like this
+	err := c.Send(conn, authString)
+	if err != nil {
+		return err
+	}
+
+	msg, _, err := framing.ReadMessage(conn, log)
+	if err != nil {
+		if err == io.EOF {
+			return fmt.Errorf("proxy aborted connection")
+		}
+		return fmt.Errorf("failed to read from connection: %w", err)
+	}
+
+	if msg == "AUTH_FAILED" {
+		return fmt.Errorf("auth failed")
+	}
+	if msg == "AUTH_OK" {
+		log.Info("successful authenticated client")
+		return nil
+	}
+
+	return fmt.Errorf("unknown auth return")
 }
 
 func (c *Client) Send(conn net.Conn, msg string) error {
