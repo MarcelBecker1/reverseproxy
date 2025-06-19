@@ -1,10 +1,13 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
+	"sync"
+	"time"
 
 	"github.com/MarcelBecker1/reverseproxy/internal/framing"
 	"github.com/MarcelBecker1/reverseproxy/internal/logger"
@@ -16,66 +19,105 @@ import (
 		2. then wait for response
 		3. then send more data
 
-		General: Need simulation to test properly
+		General: Need simulation to test properly#
+
+		Maybe add message queue?
 */
 
 var log *slog.Logger
 
 type Client struct {
-	name string
+	conf   *Config
+	conn   net.Conn
+	mu     sync.RWMutex
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 type Config struct {
-	Name string
+	Name           string
+	ConnectTimeout time.Duration
+	ReadTimeout    time.Duration
+	WriteTimeout   time.Duration
 }
 
 func New(conf *Config) *Client {
 	log = logger.NewWithComponent("client")
+
+	if conf.ConnectTimeout == 0 {
+		conf.ConnectTimeout = 10 * time.Second
+	}
+	if conf.ReadTimeout == 0 {
+		conf.ReadTimeout = 30 * time.Second
+	}
+	if conf.WriteTimeout == 0 {
+		conf.WriteTimeout = 10 * time.Second
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Client{
-		name: conf.Name,
+		conf:   conf,
+		ctx:    ctx,
+		cancel: cancel,
 	}
 }
 
 func (c *Client) Connect(host, port string, errorC chan error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	address := net.JoinHostPort(host, port)
 	log.Info("connecting client", "address", address)
 
-	conn, err := net.Dial("tcp", address)
+	dialer := &net.Dialer{
+		Timeout: c.conf.ConnectTimeout,
+	}
+
+	conn, err := dialer.DialContext(c.ctx, "tcp", address)
 	if err != nil {
 		errorC <- fmt.Errorf("error connecting to server %w", err)
 		return
 	}
-	defer conn.Close()
-	errorC <- nil
+	c.conn = conn
 
-	if err := c.auth(conn); err != nil {
+	if err := c.auth(); err != nil {
+		c.Close()
 		errorC <- fmt.Errorf("auth error %w", err)
 		return
 	}
 
-	dummyMessage := "[1] This is a client and i want to send some message. "
-	dummyMessage2 := "[2] Second smaller message, which will be combined with the first. "
-	largeDummyMessage := "[3] This is a client and i want to send some message, but this is a large message that should be split into multiple packets. " +
-		"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. " +
-		"Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. " +
-		"Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. " +
-		"Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."
-
-	go c.Send(conn, dummyMessage2)
-	c.Send(conn, dummyMessage)
-	c.Send(conn, largeDummyMessage+largeDummyMessage)
-
-	log.Info("finished sending - closing connection")
+	log.Info("connected and authenticated")
+	errorC <- nil
 }
 
-func (c *Client) auth(conn net.Conn) error {
-	authString := "testUser:testPassword" // dont really want to auth like this
-	err := c.Send(conn, authString)
+func (c *Client) IsConnected() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.conn != nil
+}
+
+func (c *Client) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.cancel()
+
+	if c.conn != nil {
+		err := c.conn.Close()
+		c.conn = nil
+		log.Info("connection closed")
+		return err
+	}
+	return nil
+}
+
+func (c *Client) auth() error {
+	authString := "auth: someUserToken" // dont really want to auth like this
+	err := c.Send(authString)
 	if err != nil {
 		return err
 	}
 
-	msg, _, err := framing.ReadMessage(conn, log)
+	msg, _, err := framing.ReadMessage(c.conn, log)
 	if err != nil {
 		if err == io.EOF {
 			return fmt.Errorf("proxy aborted connection")
@@ -94,11 +136,18 @@ func (c *Client) auth(conn net.Conn) error {
 	return fmt.Errorf("unknown auth return")
 }
 
-func (c *Client) Send(conn net.Conn, msg string) error {
-	// deadline := time.Duration(10) * time.Second
-	// conn.SetWriteDeadline(time.Now().Add(deadline))
+func (c *Client) Send(msg string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	err := framing.SendMessage(conn, msg, log)
+	if c.conn == nil {
+		return fmt.Errorf("client not connected")
+	}
+
+	c.conn.SetWriteDeadline(time.Now().Add(c.conf.WriteTimeout))
+	defer c.conn.SetWriteDeadline(time.Time{})
+
+	err := framing.SendMessage(c.conn, msg, log)
 	if err != nil {
 		return err
 	}

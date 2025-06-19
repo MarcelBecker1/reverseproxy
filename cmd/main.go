@@ -12,6 +12,10 @@ import (
 	"github.com/MarcelBecker1/reverseproxy/internal/proxy"
 )
 
+/*
+	Should serve as a simulation i can start to test the implementation
+*/
+
 var log *slog.Logger
 
 func main() {

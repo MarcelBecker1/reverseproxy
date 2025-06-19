@@ -25,7 +25,7 @@ const (
 	timeFormat      = "[15:04:05.000]"
 	maxInlineFields = 5
 
-	componentWidth = 10 // just set to the largest component
+	componentWidth = 12 // just set to the largest component
 )
 
 func colorize(colorCode int, v string) string {
@@ -56,7 +56,7 @@ func (h *Handler) WithGroup(name string) slog.Handler {
 }
 
 func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
-	level := r.Level.String() + ":"
+	level := fmt.Sprintf("%-*s", 6, r.Level.String()+":")
 
 	switch r.Level {
 	case slog.LevelDebug:
@@ -74,7 +74,8 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 		return err
 	}
 
-	component := fmt.Sprintf("%-*s", componentWidth, strings.ToUpper(componentName))
+	comp := fmt.Sprintf("[%s]", strings.ToUpper(componentName))
+	component := fmt.Sprintf("%-*s", componentWidth, strings.ToUpper(comp))
 
 	if len(attrs) <= maxInlineFields {
 		var attrStr string
@@ -92,8 +93,8 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 
 		fmt.Println(
 			colorize(white, r.Time.Format(timeFormat)),
-			colorize(magenta, component),
 			level,
+			colorize(magenta, component),
 			colorize(white, r.Message),
 			colorize(darkGray, attrStr),
 		)
