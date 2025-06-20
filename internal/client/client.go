@@ -63,21 +63,22 @@ func New(conf *Config) *Client {
 }
 
 func (c *Client) Connect(host, port string, errorC chan error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	address := net.JoinHostPort(host, port)
 	log.Info("connecting client", "address", address)
 
 	dialer := &net.Dialer{
 		Timeout: c.conf.ConnectTimeout,
 	}
-
 	conn, err := dialer.DialContext(c.ctx, "tcp", address)
+
 	if err != nil {
 		errorC <- fmt.Errorf("error connecting to server %w", err)
 		return
 	}
+
+	c.mu.Lock()
 	c.conn = conn
+	c.mu.Unlock()
 
 	if err := c.auth(); err != nil {
 		c.Close()
@@ -111,6 +112,7 @@ func (c *Client) Close() error {
 }
 
 func (c *Client) auth() error {
+	log.Info("authenticating client")
 	authString := "auth: someUserToken" // dont really want to auth like this
 	err := c.Send(authString)
 	if err != nil {

@@ -69,6 +69,11 @@ func main() {
 		log.Error("failed to connect client to server", "error", err)
 	}
 
+	go func() {
+		client.Send("Some test data")
+		client.Close()
+	}()
+
 	sig := <-sigChan
 	log.Info("received signal shutting down", "signal", sig)
 }

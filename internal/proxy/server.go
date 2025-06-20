@@ -87,9 +87,10 @@ func New(conf *Config) *ProxyServer {
 
 func (p *ProxyServer) Start(errorC chan error) {
 	hostAdress := net.JoinHostPort(p.host, p.port)
+	listener, err := net.Listen("tcp", hostAdress)
+
 	log.Info("listening for tcp connections", "address", hostAdress)
 
-	listener, err := net.Listen("tcp", hostAdress)
 	if err != nil {
 		errorC <- fmt.Errorf("failed to create tcp listener: %w", err)
 		return
