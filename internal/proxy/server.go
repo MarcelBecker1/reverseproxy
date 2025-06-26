@@ -12,9 +12,11 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/MarcelBecker1/reverseproxy/internal/connection"
 	"github.com/MarcelBecker1/reverseproxy/internal/framing"
 	"github.com/MarcelBecker1/reverseproxy/internal/gameserver"
 	"github.com/MarcelBecker1/reverseproxy/internal/logger"
+	"github.com/MarcelBecker1/reverseproxy/internal/tcpserver"
 )
 
 // Can check that we listen on port with netstat -ano | findstr ":8080"
@@ -38,18 +40,9 @@ import (
 	Does it make sense to switch to all tcp functions net functions?
 */
 
-const (
-	defaultCap uint8  = 10
-	maxGsPort  uint16 = 9000
-)
-
-var log *slog.Logger
-
 type GameServerInfo struct {
-	server      *gameserver.Server
-	capacity    uint8
-	connections uint8
-	mu          sync.Mutex
+	server   *gameserver.Server
+	connMngr *connection.Manager
 }
 
 type ClientInfo struct {
@@ -62,9 +55,12 @@ type ClientInfo struct {
 type ProxyServer struct {
 	host        string
 	port        string
-	deadline    time.Duration
+	tcpServer   *tcpserver.Server
+	connMngr    *connection.Manager
 	gameServers map[string]*GameServerInfo
 	clients     map[string]*ClientInfo
+	deadline    time.Duration
+	logger      *slog.Logger
 	mu          sync.Mutex
 }
 
@@ -74,46 +70,43 @@ type Config struct {
 	Deadline time.Duration
 }
 
-func New(conf *Config) *ProxyServer {
-	log = logger.NewWithComponent("proxy")
+const (
+	defaultCap uint16 = 10
+	maxGsPort  uint16 = 9000
+)
+
+func New(c *Config) *ProxyServer {
+	log := logger.NewWithComponent("proxy")
+	server := tcpserver.New(c.Host, c.Port, log)
+	connMngr := connection.NewManager(100) // proxy connection capacity
+
 	return &ProxyServer{
-		host:        conf.Host,
-		port:        conf.Port,
+		host:        c.Host,
+		port:        c.Port,
+		tcpServer:   server,
+		connMngr:    connMngr,
 		gameServers: make(map[string]*GameServerInfo),
 		clients:     make(map[string]*ClientInfo),
-		deadline:    conf.Deadline,
+		deadline:    c.Deadline,
+		logger:      log,
 	}
 }
 
+// Unsure if i want to start it in a new goroutine here
 func (p *ProxyServer) Start(errorC chan error) {
-	hostAdress := net.JoinHostPort(p.host, p.port)
-	listener, err := net.Listen("tcp", hostAdress)
-
-	log.Info("listening for tcp connections", "address", hostAdress)
-
-	if err != nil {
-		errorC <- fmt.Errorf("failed to create tcp listener: %w", err)
-		return
-	}
-	defer listener.Close()
-	errorC <- nil
-
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			select {
-			case errorC <- fmt.Errorf("failed to accept connection: %w", err):
-			default:
-				log.Warn("connection error but no receiver reading", "error", err)
-			}
-			continue
+	go func() {
+		if err := p.tcpServer.Start(p); err != nil {
+			errorC <- fmt.Errorf("failed to start tcp server: %w", err)
 		}
-		go p.handleConnection(conn)
-	}
+	}()
+	errorC <- nil
 }
 
-func (p *ProxyServer) handleConnection(conn net.Conn) {
+func (p *ProxyServer) HandleConnection(conn net.Conn) {
 	defer conn.Close()
+
+	p.connMngr.Increment()
+	defer p.connMngr.Decrement()
 
 	clientId := uuid.New().String()
 	client := &ClientInfo{
@@ -136,28 +129,28 @@ func (p *ProxyServer) handleConnection(conn net.Conn) {
 
 	for {
 		if err := conn.SetReadDeadline(time.Now().Add(p.deadline)); err != nil { // Do we even need the timeout?
-			log.Error("failed to set read deadline", "error", err)
+			p.logger.Error("failed to set read deadline", "error", err)
 			return
 		}
 
-		msg, bytes, err := framing.ReadMessage(conn, log)
+		msg, bytes, err := framing.ReadMessage(conn, p.logger)
 		if err != nil {
 			if err == io.EOF {
-				log.Info("client disconnected")
+				p.logger.Info("client disconnected")
 				return
 			}
-			log.Error("failed to read from connection", "error", err)
+			p.logger.Error("failed to read from connection", "error", err)
 			return
 		}
 
-		log.Info("received data",
+		p.logger.Info("received data",
 			"bytes", bytes,
 			"data", msg,
 		)
 
 		if !client.authenticated {
 			if err := p.handleAuth(client, msg); err != nil {
-				log.Error("authentication failed for client", "error", err)
+				p.logger.Error("authentication failed for client", "error", err)
 				return
 			}
 		}
@@ -167,33 +160,40 @@ func (p *ProxyServer) handleConnection(conn net.Conn) {
 			if gsInfo == nil {
 				gsInfo, err = p.startNewGameServer()
 				if err != nil {
-					log.Error("failed to start new game server", "error", err)
+					p.logger.Error("failed to start new game server", "error", err)
 					return
 				}
 			}
 
 			gsConn, err := net.Dial("tcp", net.JoinHostPort(gsInfo.server.Host(), gsInfo.server.Port()))
 			if err != nil {
-				log.Error("failed to connect to game server", "error", err)
+				p.logger.Error("failed to connect to game server", "error", err)
 				return
 			}
 			client.gsConn = gsConn
-			gsInfo.incrementConnections()
-			defer gsInfo.decrementConnections()
+			gsInfo.connMngr.Increment()
+			defer gsInfo.connMngr.Decrement()
 		}
 
-		if err := framing.SendMessage(client.gsConn, msg, log); err != nil {
-			log.Error("sending message to gs failed", "error", err)
-			return
-		}
+		p.startBidirectionalProxy(client, msg)
 	}
 }
+
+func (p *ProxyServer) startBidirectionalProxy(client *ClientInfo, msg string) {
+	// can be done in goroutines, forwarding the data to both
+	if err := framing.SendMessage(client.gsConn, msg, p.logger); err != nil {
+		p.logger.Error("sending message to gs failed", "error", err)
+		return
+	}
+}
+
+// TODO: Split the Handle Connection function into handleInitAuth / establishGsConn
 
 func (p *ProxyServer) findAvailableGameServer() *GameServerInfo {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, gs := range p.gameServers {
-		if gs.hasCapacity() {
+		if gs.connMngr.HasCapacity() {
 			return gs
 		}
 	}
@@ -201,8 +201,7 @@ func (p *ProxyServer) findAvailableGameServer() *GameServerInfo {
 }
 
 func (p *ProxyServer) startNewGameServer() (*GameServerInfo, error) {
-	cap := defaultCap
-	port, err := getFreePort(p.host, p.port)
+	port, err := p.getFreePort()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get free port: %w", err)
 	}
@@ -214,10 +213,11 @@ func (p *ProxyServer) startNewGameServer() (*GameServerInfo, error) {
 	}
 	gs := gameserver.New(gsConfig)
 
+	connMngr := connection.NewManager(defaultCap)
+
 	info := &GameServerInfo{
-		server:      gs,
-		capacity:    cap,
-		connections: 0,
+		server:   gs,
+		connMngr: connMngr,
 	}
 
 	p.mu.Lock()
@@ -229,7 +229,7 @@ func (p *ProxyServer) startNewGameServer() (*GameServerInfo, error) {
 }
 
 func (p *ProxyServer) authClient(msg string) bool {
-	return strings.Contains(strings.ToLower(msg), ("auth"))
+	return strings.Contains(strings.ToLower(msg), "auth")
 }
 
 func (p *ProxyServer) handleAuth(c *ClientInfo, msg string) error {
@@ -239,58 +239,32 @@ func (p *ProxyServer) handleAuth(c *ClientInfo, msg string) error {
 
 	if p.authClient(msg) {
 		c.authenticated = true
-		log.Info("client authenticated", "id", c.id)
-		return framing.SendMessage(c.conn, "AUTH_OK", log)
+		p.logger.Info("client authenticated", "id", c.id)
+		return framing.SendMessage(c.conn, "AUTH_OK", p.logger)
 	}
 
-	log.Warn("auth failed", "client", c.id)
-	return framing.SendMessage(c.conn, "AUTH_FAILED", log)
+	p.logger.Warn("auth failed", "client", c.id)
+	return framing.SendMessage(c.conn, "AUTH_FAILED", p.logger)
 }
 
-func (gs *GameServerInfo) incrementConnections() {
-	gs.mu.Lock()
-	defer gs.mu.Unlock()
-	gs.connections++
-}
-
-func (gs *GameServerInfo) decrementConnections() {
-	gs.mu.Lock()
-	defer gs.mu.Unlock()
-	if gs.connections > 0 {
-		gs.connections--
-	}
-}
-
-func (gs *GameServerInfo) hasCapacity() bool {
-	gs.mu.Lock()
-	defer gs.mu.Unlock()
-	return gs.connections < gs.capacity
-}
-
-func getFreePort(host, port string) (string, error) {
-	startPort, err := strconv.Atoi(port)
+func (p *ProxyServer) getFreePort() (string, error) {
+	startPort, err := strconv.Atoi(p.port)
 	if err != nil {
 		return "", err
 	}
 
-	for p := startPort + 1; p <= int(maxGsPort); p++ {
-		addr := net.JoinHostPort(host, strconv.Itoa(p))
+	for port := startPort + 1; port <= int(maxGsPort); port++ {
+		addr := net.JoinHostPort(p.host, strconv.Itoa(port))
 
 		l, err := net.Listen("tcp", addr)
 		if err != nil {
 			continue
 		}
-		defer l.Close()
+		l.Close()
 
-		port := fmt.Sprintf("%d", l.Addr().(*net.TCPAddr).Port)
-		log.Info("found port", "port", port)
-		return port, nil
+		portStr := strconv.Itoa(port)
+		p.logger.Info("found free port", "port", portStr)
+		return portStr, nil
 	}
-	return "", fmt.Errorf("no port available in the range %d to %d", startPort, maxGsPort)
+	return "", fmt.Errorf("no port available in the range %d to %d", startPort+1, maxGsPort)
 }
-
-// I need to keep track of the clients that are connected and the gameservers
-// is sql lite here a good idea?
-// What i want to do is sort of matchmaking:
-// 		if gameserver available -> forward connection to gameserver by creating new tcp socket and basically just be the man in the middle
-// 		if not available (no capacity left or non started at all) -> i want to start a new one and forward connection

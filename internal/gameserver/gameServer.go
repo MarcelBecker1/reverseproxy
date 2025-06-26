@@ -6,102 +6,81 @@ import (
 	"net"
 	"sync"
 
+	"github.com/MarcelBecker1/reverseproxy/internal/connection"
 	"github.com/MarcelBecker1/reverseproxy/internal/framing"
 	"github.com/MarcelBecker1/reverseproxy/internal/logger"
+	"github.com/MarcelBecker1/reverseproxy/internal/tcpserver"
 )
 
 /*
 	TODO:
-		1. Receive and send back data should be supported
-		2. Create some dummy data that we want to send back to clients
+		Create some dummy data that we want to send back to clients
 */
 
 type Server struct {
-	host        string
-	port        string
-	capacity    uint8
-	connections uint8
-	mu          sync.Mutex
+	host      string
+	port      string
+	tcpServer *tcpserver.Server
+	connMgr   *connection.Manager
+	mu        sync.Mutex
+	logger    *slog.Logger
 }
 
 type Config struct {
 	Host     string
 	Port     string
-	Capacity uint8
+	Capacity uint16
 }
 
-var log *slog.Logger
-
 func New(c *Config) *Server {
-	log = logger.NewWithComponent("gameserver")
+	log := logger.NewWithComponent("gameserver")
+	server := tcpserver.New(c.Host, c.Port, log)
+	connMngr := connection.NewManager(c.Capacity)
+
 	return &Server{
-		host:        c.Host,
-		port:        c.Port,
-		capacity:    c.Capacity,
-		connections: 0,
+		host:      c.Host,
+		port:      c.Port,
+		tcpServer: server,
+		connMgr:   connMngr,
+		logger:    log,
 	}
 }
 
 // Both functions are currently almost the same is in my proxy server
 // Maybe we can reduce duplications
 
-func (s *Server) Start() {
-	hostAdress := net.JoinHostPort(s.host, s.port)
-	log.Info("listening for tcp connections", "address", hostAdress)
-
-	listener, err := net.Listen("tcp", hostAdress)
-	if err != nil {
-		log.Error("failed to create tcp listener", "error", err)
-		return
-	}
-	defer listener.Close()
-
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			log.Error("failed to accept connection", "error", err)
-			continue
-		}
-		go s.handleConnection(conn)
-	}
+func (s *Server) Start() error {
+	return s.tcpServer.Start(s)
 }
 
-func (s *Server) handleConnection(conn net.Conn) {
+func (s *Server) HandleConnection(conn net.Conn) {
 	defer conn.Close()
-	s.incConnections()
+	s.connMgr.Increment()
+	defer s.connMgr.Decrement()
 
 	for {
 		// we are not setting read deadling atm, maybe change? -> be consistent
-		msg, bytes, err := framing.ReadMessage(conn, log)
+		msg, bytes, err := framing.ReadMessage(conn, s.logger)
 		if err != nil {
 			if err == io.EOF {
-				log.Info("client disconnected")
-				s.handleDisconnect()
+				s.logger.Info("client disconnected")
 				return
 			}
-			log.Error("failed to read from connection", "error", err)
+			s.logger.Error("failed to read from connection", "error", err)
 			return
 		}
 
-		log.Info("received data",
+		s.logger.Info("received data",
 			"bytes", bytes,
 			"data", msg,
 		)
+
+		// TODO: Do something with it, for now, just echo back
+		if err := framing.SendMessage(conn, "ACK: "+msg, s.logger); err != nil {
+			s.logger.Error("failed to send response", "error", err)
+			return
+		}
 	}
-}
-
-func (s *Server) incConnections() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.connections++
-	log.Info("received new user", "connections", s.connections)
-}
-
-func (s *Server) handleDisconnect() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.connections--
-	log.Info("user disconnected", "connections", s.connections)
 }
 
 func (s *Server) Host() string {
@@ -110,4 +89,12 @@ func (s *Server) Host() string {
 
 func (s *Server) Port() string {
 	return s.port
+}
+
+func (s *Server) HasCapacity() bool {
+	return s.connMgr.HasCapacity()
+}
+
+func (s *Server) ConnectionCount() uint16 {
+	return s.connMgr.Count()
 }
