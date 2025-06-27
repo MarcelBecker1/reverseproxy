@@ -40,6 +40,8 @@ import (
 	Does it make sense to switch to all tcp functions net functions?
 */
 
+// Maybe use embeddigs
+
 type GameServerInfo struct {
 	server   *gameserver.Server
 	connMngr *connection.Manager
@@ -49,6 +51,7 @@ type ClientInfo struct {
 	id            string
 	conn          net.Conn
 	gsConn        net.Conn
+	gsKey         string
 	authenticated bool
 }
 
@@ -61,7 +64,7 @@ type ProxyServer struct {
 	clients     map[string]*ClientInfo
 	deadline    time.Duration
 	logger      *slog.Logger
-	mu          sync.Mutex
+	mu          sync.RWMutex
 }
 
 type Config struct {
@@ -92,13 +95,10 @@ func New(c *Config) *ProxyServer {
 	}
 }
 
-// Unsure if i want to start it in a new goroutine here
 func (p *ProxyServer) Start(errorC chan error) {
-	go func() {
-		if err := p.tcpServer.Start(p); err != nil {
-			errorC <- fmt.Errorf("failed to start tcp server: %w", err)
-		}
-	}()
+	if err := p.tcpServer.Start(p); err != nil {
+		errorC <- fmt.Errorf("failed to start tcp server: %w", err)
+	}
 	errorC <- nil
 }
 
@@ -127,57 +127,74 @@ func (p *ProxyServer) HandleConnection(conn net.Conn) {
 		p.mu.Unlock()
 	}()
 
-	for {
-		if err := conn.SetReadDeadline(time.Now().Add(p.deadline)); err != nil { // Do we even need the timeout?
-			p.logger.Error("failed to set read deadline", "error", err)
-			return
+	if err := p.handleInitAuth(client); err != nil {
+		p.logger.Error("failed initial auth", "error", err)
+		return
+	}
+
+	if err := p.establishGSConnection(client); err != nil {
+		p.logger.Error("failed initial auth", "error", err)
+		return
+	}
+	gsInfo := p.gameServers[client.gsKey]
+
+	gsInfo.connMngr.Increment()
+	defer gsInfo.connMngr.Decrement()
+
+	p.startBidirectionalProxy(client)
+}
+
+func (p *ProxyServer) handleInitAuth(client *ClientInfo) error {
+	for !client.authenticated {
+		if err := client.conn.SetReadDeadline(time.Now().Add(p.deadline)); err != nil {
+			return fmt.Errorf("failed to set read deadline: %w", err)
 		}
 
-		msg, bytes, err := framing.ReadMessage(conn, p.logger)
+		msg, bytes, err := framing.ReadMessage(client.conn, p.logger)
 		if err != nil {
 			if err == io.EOF {
-				p.logger.Info("client disconnected")
-				return
+				return fmt.Errorf("client disconnected during auth")
 			}
-			p.logger.Error("failed to read from connection", "error", err)
-			return
+			return fmt.Errorf("failed to read from connection %w", err)
 		}
 
-		p.logger.Info("received data",
-			"bytes", bytes,
-			"data", msg,
-		)
+		p.logger.Info("received auth data", "bytes", bytes, "data", msg)
 
-		if !client.authenticated {
-			if err := p.handleAuth(client, msg); err != nil {
-				p.logger.Error("authentication failed for client", "error", err)
-				return
-			}
+		if err := p.handleAuth(client, msg); err != nil {
+			return err
 		}
-
-		if client.gsConn == nil {
-			gsInfo := p.findAvailableGameServer()
-			if gsInfo == nil {
-				gsInfo, err = p.startNewGameServer()
-				if err != nil {
-					p.logger.Error("failed to start new game server", "error", err)
-					return
-				}
-			}
-
-			gsConn, err := net.Dial("tcp", net.JoinHostPort(gsInfo.server.Host(), gsInfo.server.Port()))
-			if err != nil {
-				p.logger.Error("failed to connect to game server", "error", err)
-				return
-			}
-			client.gsConn = gsConn
-			gsInfo.connMngr.Increment()
-			defer gsInfo.connMngr.Decrement()
-		}
-
-		p.startBidirectionalProxy(client, msg)
 	}
+	return nil
 }
+
+func (p *ProxyServer) establishGSConnection(client *ClientInfo) error {
+	gsInfo := p.findAvailableGameServer()
+	if gsInfo == nil {
+		var err error
+		gsInfo, err = p.startNewGameServer()
+		if err != nil {
+			return fmt.Errorf("failed to start new game server %w", err)
+		}
+	}
+	gsKey := net.JoinHostPort(gsInfo.server.Host(), gsInfo.server.Port())
+	gsConn, err := net.Dial("tcp", gsKey)
+	if err != nil {
+		return fmt.Errorf("failed to connect to game server %w", err)
+	}
+	client.gsConn = gsConn
+	client.gsKey = gsKey
+	return nil
+}
+
+// Currently its all over the place, we need to
+// 1. Auth from client to proxy
+// 2. Forward to gs
+// 3. Gs checks again and returns to proxy
+// 4. Proxy returns to client
+// 5. Proxy keeps listening
+// In general we just need 2 listeners as goroutines that for now run in while loops
+// one for messages from client to gs
+// one for messages from gs to client
 
 func (p *ProxyServer) startBidirectionalProxy(client *ClientInfo, msg string) {
 	// can be done in goroutines, forwarding the data to both
@@ -185,9 +202,53 @@ func (p *ProxyServer) startBidirectionalProxy(client *ClientInfo, msg string) {
 		p.logger.Error("sending message to gs failed", "error", err)
 		return
 	}
+
+	for {
+		if err := client.conn.SetReadDeadline(time.Now().Add(p.deadline)); err != nil {
+			return fmt.Errorf("failed to set read deadline: %w", err)
+		}
+
+		msg, bytes, err := framing.ReadMessage(client.conn, p.logger)
+		if err != nil {
+			if err == io.EOF {
+				return fmt.Errorf("client disconnected during auth")
+			}
+			return fmt.Errorf("failed to read from connection %w", err)
+		}
+
+		p.logger.Info("received auth data", "bytes", bytes, "data", msg)
+
+		if err := p.handleAuth(client, msg); err != nil {
+			return err
+		}
+	}
+
+	go func() {
+		// read
+	}()
+
+	// start listener
 }
 
-// TODO: Split the Handle Connection function into handleInitAuth / establishGsConn
+func (p *ProxyServer) authClient(msg string) bool {
+	return strings.Contains(strings.ToLower(msg), "auth")
+}
+
+func (p *ProxyServer) handleAuth(c *ClientInfo, msg string) error {
+	if c.authenticated {
+		return nil
+	}
+
+	if p.authClient(msg) {
+		c.authenticated = true
+		p.logger.Info("client authenticated", "id", c.id)
+		return framing.SendMessage(c.conn, "AUTH_OK", p.logger)
+	}
+
+	p.logger.Warn("auth failed", "client", c.id)
+	framing.SendMessage(c.conn, "AUTH_FAILED", p.logger)
+	return fmt.Errorf("missing auth in message")
+}
 
 func (p *ProxyServer) findAvailableGameServer() *GameServerInfo {
 	p.mu.Lock()
@@ -226,25 +287,6 @@ func (p *ProxyServer) startNewGameServer() (*GameServerInfo, error) {
 
 	go gs.Start()
 	return info, nil
-}
-
-func (p *ProxyServer) authClient(msg string) bool {
-	return strings.Contains(strings.ToLower(msg), "auth")
-}
-
-func (p *ProxyServer) handleAuth(c *ClientInfo, msg string) error {
-	if c.authenticated {
-		return nil
-	}
-
-	if p.authClient(msg) {
-		c.authenticated = true
-		p.logger.Info("client authenticated", "id", c.id)
-		return framing.SendMessage(c.conn, "AUTH_OK", p.logger)
-	}
-
-	p.logger.Warn("auth failed", "client", c.id)
-	return framing.SendMessage(c.conn, "AUTH_FAILED", p.logger)
 }
 
 func (p *ProxyServer) getFreePort() (string, error) {
