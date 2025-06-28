@@ -1,6 +1,7 @@
-package proxy
+package server
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,39 +13,19 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/MarcelBecker1/reverseproxy/internal/connection"
-	"github.com/MarcelBecker1/reverseproxy/internal/framing"
-	"github.com/MarcelBecker1/reverseproxy/internal/gameserver"
 	"github.com/MarcelBecker1/reverseproxy/internal/logger"
-	"github.com/MarcelBecker1/reverseproxy/internal/tcpserver"
+	"github.com/MarcelBecker1/reverseproxy/internal/netutils"
 )
 
-// Can check that we listen on port with netstat -ano | findstr ":8080"
-
-// Should use raw tcp socket connections
-
 /*
-	TODO:
-		1. Can we split some functions, create new files to seperate concerns better?
-		2. Can we test it like this? Need interfaces?
-		3. Error handling more consistent?
-		4. Better cleanup / shutdown logic
-		5. Connection pooling for gs?
-		6. Healthchecks for gs?
-		7. Performance considerations?
-
-	What we need here:
-		- Bidirectional data flow, now we only get data from client and forward to gs but we need to also receive from gs and forward to client as mitm
-
-
 	Does it make sense to switch to all tcp functions net functions?
 */
 
-// Maybe use embeddigs
+// Maybe use embeddigs ?
 
 type GameServerInfo struct {
-	server   *gameserver.Server
-	connMngr *connection.Manager
+	server   *GameServer
+	connMngr *netutils.Manager
 }
 
 type ClientInfo struct {
@@ -58,8 +39,8 @@ type ClientInfo struct {
 type ProxyServer struct {
 	host        string
 	port        string
-	tcpServer   *tcpserver.Server
-	connMngr    *connection.Manager
+	tcpServer   *TCPServer
+	connMngr    *netutils.Manager
 	gameServers map[string]*GameServerInfo
 	clients     map[string]*ClientInfo
 	deadline    time.Duration
@@ -67,7 +48,7 @@ type ProxyServer struct {
 	mu          sync.RWMutex
 }
 
-type Config struct {
+type ProxyServerConfig struct {
 	Host     string
 	Port     string
 	Deadline time.Duration
@@ -78,10 +59,10 @@ const (
 	maxGsPort  uint16 = 9000
 )
 
-func New(c *Config) *ProxyServer {
+func NewProxyServer(c *ProxyServerConfig) *ProxyServer {
 	log := logger.NewWithComponent("proxy")
-	server := tcpserver.New(c.Host, c.Port, log)
-	connMngr := connection.NewManager(100) // proxy connection capacity
+	server := NewTCPServer(c.Host, c.Port, log)
+	connMngr := netutils.NewManager(100) // proxy connection capacity
 
 	return &ProxyServer{
 		host:        c.Host,
@@ -98,6 +79,7 @@ func New(c *Config) *ProxyServer {
 func (p *ProxyServer) Start(errorC chan error) {
 	if err := p.tcpServer.Start(p); err != nil {
 		errorC <- fmt.Errorf("failed to start tcp server: %w", err)
+		return
 	}
 	errorC <- nil
 }
@@ -119,6 +101,7 @@ func (p *ProxyServer) HandleConnection(conn net.Conn) {
 	p.mu.Unlock()
 
 	defer func() {
+		p.logger.Info("closing connections")
 		p.mu.Lock()
 		delete(p.clients, clientId)
 		if client.gsConn != nil {
@@ -133,7 +116,7 @@ func (p *ProxyServer) HandleConnection(conn net.Conn) {
 	}
 
 	if err := p.establishGSConnection(client); err != nil {
-		p.logger.Error("failed initial auth", "error", err)
+		p.logger.Error("failed to establish game server connection", "error", err)
 		return
 	}
 	gsInfo := p.gameServers[client.gsKey]
@@ -145,12 +128,21 @@ func (p *ProxyServer) HandleConnection(conn net.Conn) {
 }
 
 func (p *ProxyServer) handleInitAuth(client *ClientInfo) error {
+	authTimeout := time.After(30 * time.Second)
+
 	for !client.authenticated {
+		select {
+		case <-authTimeout:
+			return fmt.Errorf("authentication timeout")
+		default:
+
+		}
+
 		if err := client.conn.SetReadDeadline(time.Now().Add(p.deadline)); err != nil {
 			return fmt.Errorf("failed to set read deadline: %w", err)
 		}
 
-		msg, bytes, err := framing.ReadMessage(client.conn, p.logger)
+		msg, bytes, err := netutils.ReadMessage(client.conn, p.logger)
 		if err != nil {
 			if err == io.EOF {
 				return fmt.Errorf("client disconnected during auth")
@@ -186,48 +178,93 @@ func (p *ProxyServer) establishGSConnection(client *ClientInfo) error {
 	return nil
 }
 
-// Currently its all over the place, we need to
-// 1. Auth from client to proxy
-// 2. Forward to gs
-// 3. Gs checks again and returns to proxy
-// 4. Proxy returns to client
-// 5. Proxy keeps listening
-// In general we just need 2 listeners as goroutines that for now run in while loops
-// one for messages from client to gs
-// one for messages from gs to client
+func (p *ProxyServer) startBidirectionalProxy(client *ClientInfo) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-func (p *ProxyServer) startBidirectionalProxy(client *ClientInfo, msg string) {
-	// can be done in goroutines, forwarding the data to both
-	if err := framing.SendMessage(client.gsConn, msg, p.logger); err != nil {
-		p.logger.Error("sending message to gs failed", "error", err)
-		return
-	}
-
-	for {
-		if err := client.conn.SetReadDeadline(time.Now().Add(p.deadline)); err != nil {
-			return fmt.Errorf("failed to set read deadline: %w", err)
-		}
-
-		msg, bytes, err := framing.ReadMessage(client.conn, p.logger)
-		if err != nil {
-			if err == io.EOF {
-				return fmt.Errorf("client disconnected during auth")
-			}
-			return fmt.Errorf("failed to read from connection %w", err)
-		}
-
-		p.logger.Info("received auth data", "bytes", bytes, "data", msg)
-
-		if err := p.handleAuth(client, msg); err != nil {
-			return err
-		}
-	}
+	var wg sync.WaitGroup
+	wg.Add(2)
 
 	go func() {
-		// read
+		defer wg.Done()
+		defer cancel()
+		p.handleClientCommunication(ctx, client)
 	}()
 
-	// start listener
+	go func() {
+		defer wg.Done()
+		defer cancel()
+		p.handleGSCommunication(ctx, client)
+	}()
+
+	wg.Wait()
+	p.logger.Info("proxy session ended", "client", client.id)
+}
+
+// TOOD: Implement retry with exp backoff (maybe 3 times) before closing connection
+
+// Currently pretty much the same but they might diverge more so we keep them as 2 seperate functions for now
+
+func (p *ProxyServer) handleClientCommunication(ctx context.Context, client *ClientInfo) {
+	clientMsgChan := make(chan string, 10)
+	go netutils.ListenForMessages(ctx, client.conn, clientMsgChan, p.deadline, p.logger)
+
+	for {
+		select {
+		case <-ctx.Done():
+			p.logger.Info("client communication stopped", "reason", "context cancelled")
+			return
+		case msg, ok := <-clientMsgChan:
+			if !ok || msg == "" {
+				p.logger.Info("client channel closed")
+				p.forwardMsg(client.gsConn, "client connection closed")
+				return
+			}
+			if err := p.forwardMsg(client.gsConn, msg); err != nil {
+				// send client abort message
+				p.logger.Error("failed to forward to gs", "error", err)
+				p.forwardMsg(client.conn, "failed to forward to gs - aborting connection")
+				return
+			}
+		}
+	}
+}
+
+func (p *ProxyServer) handleGSCommunication(ctx context.Context, client *ClientInfo) {
+	gsMsgChan := make(chan string, 20)
+	go netutils.ListenForMessages(ctx, client.gsConn, gsMsgChan, p.deadline, p.logger)
+
+	for {
+		select {
+		case <-ctx.Done():
+			p.logger.Info("gs communication stopped", "reason", "context cancelled")
+			return
+		case msg, ok := <-gsMsgChan:
+			if !ok || msg == "" {
+				p.logger.Info("gs channel closed")
+				p.forwardMsg(client.conn, "gs connection closed")
+				return
+			}
+			if err := p.forwardMsg(client.conn, msg); err != nil {
+				// send gs abort message
+				p.logger.Error("failed to forward to client", "error", err)
+				p.forwardMsg(client.gsConn, "failed forwarding msg to client - aborting connection")
+				return
+			}
+		}
+	}
+}
+
+func (p *ProxyServer) forwardMsg(conn net.Conn, msg string) error {
+	if err := conn.SetWriteDeadline(time.Now().Add(p.deadline)); err != nil {
+		return fmt.Errorf("failed to set write deadling %w", err)
+	}
+
+	if err := netutils.SendMessage(conn, msg, p.logger); err != nil {
+		return fmt.Errorf("failed sending messages to gs %w", err)
+	}
+
+	return nil
 }
 
 func (p *ProxyServer) authClient(msg string) bool {
@@ -242,11 +279,11 @@ func (p *ProxyServer) handleAuth(c *ClientInfo, msg string) error {
 	if p.authClient(msg) {
 		c.authenticated = true
 		p.logger.Info("client authenticated", "id", c.id)
-		return framing.SendMessage(c.conn, "AUTH_OK", p.logger)
+		return netutils.SendMessage(c.conn, "AUTH_OK", p.logger)
 	}
 
 	p.logger.Warn("auth failed", "client", c.id)
-	framing.SendMessage(c.conn, "AUTH_FAILED", p.logger)
+	netutils.SendMessage(c.conn, "AUTH_FAILED", p.logger)
 	return fmt.Errorf("missing auth in message")
 }
 
@@ -267,14 +304,14 @@ func (p *ProxyServer) startNewGameServer() (*GameServerInfo, error) {
 		return nil, fmt.Errorf("failed to get free port: %w", err)
 	}
 
-	gsConfig := &gameserver.Config{
+	gsConfig := &GameServerConfig{
 		Host:     "localhost",
 		Port:     port,
 		Capacity: defaultCap,
 	}
-	gs := gameserver.New(gsConfig)
+	gs := NewGameServer(gsConfig)
 
-	connMngr := connection.NewManager(defaultCap)
+	connMngr := netutils.NewManager(defaultCap)
 
 	info := &GameServerInfo{
 		server:   gs,

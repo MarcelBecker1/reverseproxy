@@ -9,7 +9,7 @@ import (
 
 	"github.com/MarcelBecker1/reverseproxy/internal/client"
 	"github.com/MarcelBecker1/reverseproxy/internal/logger"
-	"github.com/MarcelBecker1/reverseproxy/internal/proxy"
+	"github.com/MarcelBecker1/reverseproxy/internal/server"
 )
 
 /*
@@ -38,7 +38,7 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	log.Info("starting reverse proxy")
-	server := proxy.New(&proxy.Config{
+	server := server.NewProxyServer(&server.ProxyServerConfig{
 		Host:     host,
 		Port:     port,
 		Deadline: deadline,

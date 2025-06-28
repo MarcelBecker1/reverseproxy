@@ -18,7 +18,7 @@ Do we need larger header with checksums or something? Checksums is handled by TC
 	Should be covered, I only need it for knowing where to split the messages
 */
 
-package framing
+package netutils
 
 import (
 	"encoding/binary"

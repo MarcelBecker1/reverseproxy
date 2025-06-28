@@ -1,4 +1,4 @@
-package gameserver
+package server
 
 import (
 	"io"
@@ -6,10 +6,8 @@ import (
 	"net"
 	"sync"
 
-	"github.com/MarcelBecker1/reverseproxy/internal/connection"
-	"github.com/MarcelBecker1/reverseproxy/internal/framing"
 	"github.com/MarcelBecker1/reverseproxy/internal/logger"
-	"github.com/MarcelBecker1/reverseproxy/internal/tcpserver"
+	"github.com/MarcelBecker1/reverseproxy/internal/netutils"
 )
 
 /*
@@ -17,27 +15,27 @@ import (
 		Create some dummy data that we want to send back to clients
 */
 
-type Server struct {
+type GameServer struct {
 	host      string
 	port      string
-	tcpServer *tcpserver.Server
-	connMgr   *connection.Manager
+	tcpServer *TCPServer
+	connMgr   *netutils.Manager
 	mu        sync.Mutex
 	logger    *slog.Logger
 }
 
-type Config struct {
+type GameServerConfig struct {
 	Host     string
 	Port     string
 	Capacity uint16
 }
 
-func New(c *Config) *Server {
+func NewGameServer(c *GameServerConfig) *GameServer {
 	log := logger.NewWithComponent("gameserver")
-	server := tcpserver.New(c.Host, c.Port, log)
-	connMngr := connection.NewManager(c.Capacity)
+	server := NewTCPServer(c.Host, c.Port, log)
+	connMngr := netutils.NewManager(c.Capacity)
 
-	return &Server{
+	return &GameServer{
 		host:      c.Host,
 		port:      c.Port,
 		tcpServer: server,
@@ -46,21 +44,18 @@ func New(c *Config) *Server {
 	}
 }
 
-// Both functions are currently almost the same is in my proxy server
-// Maybe we can reduce duplications
-
-func (s *Server) Start() error {
+func (s *GameServer) Start() error {
 	return s.tcpServer.Start(s)
 }
 
-func (s *Server) HandleConnection(conn net.Conn) {
+func (s *GameServer) HandleConnection(conn net.Conn) {
 	defer conn.Close()
 	s.connMgr.Increment()
 	defer s.connMgr.Decrement()
 
 	for {
 		// we are not setting read deadling atm, maybe change? -> be consistent
-		msg, bytes, err := framing.ReadMessage(conn, s.logger)
+		msg, bytes, err := netutils.ReadMessage(conn, s.logger)
 		if err != nil {
 			if err == io.EOF {
 				s.logger.Info("client disconnected")
@@ -76,25 +71,25 @@ func (s *Server) HandleConnection(conn net.Conn) {
 		)
 
 		// TODO: Do something with it, for now, just echo back
-		if err := framing.SendMessage(conn, "ACK: "+msg, s.logger); err != nil {
+		if err := netutils.SendMessage(conn, "ACK: "+msg, s.logger); err != nil {
 			s.logger.Error("failed to send response", "error", err)
 			return
 		}
 	}
 }
 
-func (s *Server) Host() string {
+func (s *GameServer) Host() string {
 	return s.host
 }
 
-func (s *Server) Port() string {
+func (s *GameServer) Port() string {
 	return s.port
 }
 
-func (s *Server) HasCapacity() bool {
+func (s *GameServer) HasCapacity() bool {
 	return s.connMgr.HasCapacity()
 }
 
-func (s *Server) ConnectionCount() uint16 {
+func (s *GameServer) ConnectionCount() uint16 {
 	return s.connMgr.Count()
 }

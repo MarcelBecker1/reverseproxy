@@ -1,4 +1,4 @@
-package tcpserver
+package server
 
 import (
 	"log/slog"
@@ -9,22 +9,22 @@ type Handler interface {
 	HandleConnection(conn net.Conn)
 }
 
-type Server struct {
+type TCPServer struct {
 	host     string
 	port     string
 	listener net.Listener
 	logger   *slog.Logger
 }
 
-func New(host, port string, logger *slog.Logger) *Server {
-	return &Server{
+func NewTCPServer(host, port string, logger *slog.Logger) *TCPServer {
+	return &TCPServer{
 		host:   host,
 		port:   port,
 		logger: logger,
 	}
 }
 
-func (s *Server) Start(handler Handler) error {
+func (s *TCPServer) Start(handler Handler) error {
 	hostAdress := net.JoinHostPort(s.host, s.port)
 	listener, err := net.Listen("tcp", hostAdress)
 	if err != nil {
@@ -45,7 +45,7 @@ func (s *Server) Start(handler Handler) error {
 	}
 }
 
-func (s *Server) Close() error {
+func (s *TCPServer) Close() error {
 	if s.listener != nil {
 		return s.listener.Close()
 	}

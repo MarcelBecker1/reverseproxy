@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/MarcelBecker1/reverseproxy/internal/framing"
 	"github.com/MarcelBecker1/reverseproxy/internal/logger"
+	"github.com/MarcelBecker1/reverseproxy/internal/netutils"
 )
 
 /*
@@ -38,7 +38,7 @@ func New(conf *Config) *Client {
 	log = logger.NewWithComponent("client")
 
 	if conf.ConnectTimeout == 0 {
-		conf.ConnectTimeout = 10 * time.Second
+		conf.ConnectTimeout = 30 * time.Second
 	}
 	if conf.ReadTimeout == 0 {
 		conf.ReadTimeout = 30 * time.Second
@@ -112,7 +112,7 @@ func (c *Client) auth() error {
 		return err
 	}
 
-	msg, _, err := framing.ReadMessage(c.conn, log)
+	msg, _, err := netutils.ReadMessage(c.conn, log)
 	if err != nil {
 		if err == io.EOF {
 			return fmt.Errorf("proxy aborted connection")
@@ -142,7 +142,7 @@ func (c *Client) Send(msg string) error {
 	c.conn.SetWriteDeadline(time.Now().Add(c.conf.WriteTimeout))
 	defer c.conn.SetWriteDeadline(time.Time{})
 
-	err := framing.SendMessage(c.conn, msg, log)
+	err := netutils.SendMessage(c.conn, msg, log)
 	if err != nil {
 		return err
 	}

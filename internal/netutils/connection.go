@@ -1,4 +1,4 @@
-package connection
+package netutils
 
 import "sync"
 
@@ -10,6 +10,7 @@ type Manager struct {
 
 func NewManager(capacity uint16) *Manager {
 	return &Manager{
+		mu:          &sync.RWMutex{},
 		connections: 0,
 		capacity:    capacity,
 	}
