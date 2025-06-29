@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
+
 	"net"
 	"sync"
 	"time"
@@ -17,14 +19,13 @@ import (
 	Maybe add message queue?
 */
 
-var log *slog.Logger
-
 type Client struct {
 	conf   *Config
 	conn   net.Conn
 	mu     sync.RWMutex
 	ctx    context.Context
 	cancel context.CancelFunc
+	logger *slog.Logger
 }
 
 type Config struct {
@@ -35,7 +36,7 @@ type Config struct {
 }
 
 func New(conf *Config) *Client {
-	log = logger.NewWithComponent("client")
+	log := logger.NewWithComponent("client")
 
 	if conf.ConnectTimeout == 0 {
 		conf.ConnectTimeout = 30 * time.Second
@@ -52,12 +53,13 @@ func New(conf *Config) *Client {
 		conf:   conf,
 		ctx:    ctx,
 		cancel: cancel,
+		logger: log,
 	}
 }
 
 func (c *Client) Connect(host, port string, errorC chan error) {
 	address := net.JoinHostPort(host, port)
-	log.Info("connecting client", "address", address)
+	c.logger.Info("connecting client", "address", address)
 
 	dialer := &net.Dialer{
 		Timeout: c.conf.ConnectTimeout,
@@ -79,8 +81,83 @@ func (c *Client) Connect(host, port string, errorC chan error) {
 		return
 	}
 
-	log.Info("connected and authenticated")
+	c.logger.Info("connected and authenticated")
 	errorC <- nil
+
+	c.handleProxyConnection()
+	c.Close()
+}
+
+func (c *Client) handleProxyConnection() {
+	msgChan := make(chan string, 20)
+	go netutils.ListenForMessages(c.ctx, c.conn, msgChan, c.conf.ReadTimeout, c.logger)
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			c.logger.Info("proxy communication stopped", "reason", "context cancelled")
+			return
+		case msg, ok := <-msgChan:
+			if !ok {
+				c.logger.Info("proxy channel closed")
+				return
+			}
+			if msg == "" {
+				c.logger.Warn("received emptpy messages from proxy")
+				continue
+			}
+			if strings.HasSuffix(msg, "aborting connection") { // not optimal to look for this string -> change
+				c.logger.Info("abort received from proxy")
+				return
+			}
+
+			c.logger.Info("received message", "message", msg)
+		}
+	}
+}
+
+func (c *Client) Send(msg string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.conn == nil {
+		return fmt.Errorf("client not connected")
+	}
+
+	select {
+	case <-c.ctx.Done():
+		return fmt.Errorf("can't send message - reason: context cancelled")
+	default:
+		c.conn.SetWriteDeadline(time.Now().Add(c.conf.WriteTimeout))
+		return netutils.SendMessage(c.conn, msg, c.logger)
+	}
+}
+
+func (c *Client) auth() error {
+	c.logger.Info("authenticating client")
+	authString := "auth: someUserToken" // dont really want to auth like this
+	err := c.Send(authString)
+	if err != nil {
+		return err
+	}
+
+	msg, _, err := netutils.ReadMessage(c.conn, c.logger)
+	if err != nil {
+		if err == io.EOF {
+			return fmt.Errorf("proxy aborted connection")
+		}
+		return fmt.Errorf("failed to read from connection: %w", err)
+	}
+
+	if msg == "AUTH_FAILED" {
+		return fmt.Errorf("auth failed")
+	}
+	if msg == "AUTH_OK" {
+		c.logger.Info("successful authenticated client")
+		return nil
+	}
+
+	return fmt.Errorf("unknown auth return")
 }
 
 func (c *Client) IsConnected() bool {
@@ -93,58 +170,16 @@ func (c *Client) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.cancel()
+	if c.cancel != nil {
+		c.cancel()
+	}
 
+	var err error
 	if c.conn != nil {
-		err := c.conn.Close()
+		c.logger.Info("closing connection")
+		err = c.conn.Close()
 		c.conn = nil
-		log.Info("connection closed")
-		return err
-	}
-	return nil
-}
-
-func (c *Client) auth() error {
-	log.Info("authenticating client")
-	authString := "auth: someUserToken" // dont really want to auth like this
-	err := c.Send(authString)
-	if err != nil {
-		return err
 	}
 
-	msg, _, err := netutils.ReadMessage(c.conn, log)
-	if err != nil {
-		if err == io.EOF {
-			return fmt.Errorf("proxy aborted connection")
-		}
-		return fmt.Errorf("failed to read from connection: %w", err)
-	}
-
-	if msg == "AUTH_FAILED" {
-		return fmt.Errorf("auth failed")
-	}
-	if msg == "AUTH_OK" {
-		log.Info("successful authenticated client")
-		return nil
-	}
-
-	return fmt.Errorf("unknown auth return")
-}
-
-func (c *Client) Send(msg string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.conn == nil {
-		return fmt.Errorf("client not connected")
-	}
-
-	c.conn.SetWriteDeadline(time.Now().Add(c.conf.WriteTimeout))
-	defer c.conn.SetWriteDeadline(time.Time{})
-
-	err := netutils.SendMessage(c.conn, msg, log)
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }

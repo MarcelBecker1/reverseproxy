@@ -16,8 +16,6 @@ import (
 	Should serve as a simulation i can start to test the implementation
 */
 
-var log *slog.Logger
-
 func main() {
 	const host string = "localhost"
 	const port string = "8080"
@@ -29,7 +27,7 @@ func main() {
 	}))
 	slog.SetDefault(prettyLogger)
 
-	log = logger.NewWithComponent("main")
+	log := logger.NewWithComponent("main")
 
 	// Currently we create simple channel for os interrupts with buffer size 1, thus we are blocking the main thread after starting
 	// the goroutines until we get the interrupt and can finish gracefully
@@ -39,9 +37,9 @@ func main() {
 
 	log.Info("starting reverse proxy")
 	server := server.NewProxyServer(&server.ProxyServerConfig{
-		Host:     host,
-		Port:     port,
-		Deadline: deadline,
+		Host:    host,
+		Port:    port,
+		Timeout: deadline,
 	})
 
 	serverChan := make(chan error)

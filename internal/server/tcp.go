@@ -32,17 +32,21 @@ func (s *TCPServer) Start(handler Handler) error {
 		return err
 	}
 	s.listener = listener
-	defer listener.Close()
 	s.logger.Info("listening for tcp connections", "address", hostAdress)
 
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			s.logger.Error("failed to accept connection", "error", err)
-			continue
+	go func() {
+		defer listener.Close()
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				s.logger.Error("failed to accept connection", "error", err)
+				continue // TODO: better handling of errors for permanent ones
+			}
+			go handler.HandleConnection(conn)
 		}
-		go handler.HandleConnection(conn)
-	}
+	}()
+
+	return nil
 }
 
 func (s *TCPServer) Close() error {
