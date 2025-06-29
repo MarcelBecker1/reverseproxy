@@ -13,7 +13,9 @@ import (
 )
 
 /*
-	Should serve as a simulation i can start to test the implementation
+	Should have better logging, maybe with component (client, proxy, gameserver) and then the file we are in like reader? or have less and more meaningful logs
+	-> it is a bit hard to know from what it was caused currently
+	Implement real simulation as a way to test
 */
 
 func main() {
@@ -68,9 +70,15 @@ func main() {
 	}
 
 	go func() {
+		time.Sleep(100 * time.Millisecond)
 		client.Send("Some test data")
-		client.Close()
+		client.Send("Something else")
+		time.Sleep(2 * time.Second)
+		client.Send("Last message")
 	}()
+
+	time.Sleep(5 * time.Second)
+	client.Close()
 
 	sig := <-sigChan
 	log.Info("received signal shutting down", "signal", sig)

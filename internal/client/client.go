@@ -106,7 +106,8 @@ func (c *Client) handleProxyConnection() {
 				c.logger.Warn("received emptpy messages from proxy")
 				continue
 			}
-			if strings.HasSuffix(msg, "aborting connection") { // not optimal to look for this string -> change
+			// TODO: not optimal to look for this strings, should have better signaling here
+			if strings.HasSuffix(msg, "aborting connection") || strings.Contains(msg, "gs connection closed") {
 				c.logger.Info("abort received from proxy")
 				return
 			}

@@ -25,6 +25,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 )
 
 func SendMessage(conn io.Writer, msg string, log *slog.Logger) error {
@@ -47,14 +48,14 @@ func SendMessage(conn io.Writer, msg string, log *slog.Logger) error {
 		return err
 	}
 
-	log.Info("sent data to server", "bytes", n)
+	log.Info("sent data", "bytes", n, "message", msg)
 	return nil
 }
 
 func ReadMessage(conn io.Reader, log *slog.Logger) (string, uint32, error) {
 	length := make([]byte, 4)
 	if _, err := io.ReadFull(conn, length); err != nil {
-		if err != io.EOF {
+		if err != io.EOF && !isConnectionClosed(err) {
 			log.Error("failed to read length prefix", "error", err)
 		}
 		return "", 0, err
@@ -65,8 +66,15 @@ func ReadMessage(conn io.Reader, log *slog.Logger) (string, uint32, error) {
 
 	_, err := io.ReadFull(conn, data)
 	if err != nil {
-		log.Error("failed to read data", "error", err)
+		if err != io.EOF && !isConnectionClosed(err) {
+			log.Error("failed to read data", "error", err)
+		}
 		return "", 0, err
 	}
+
 	return string(data), dataLength, nil
+}
+
+func isConnectionClosed(err error) bool {
+	return strings.Contains(err.Error(), "use of closed network connection")
 }

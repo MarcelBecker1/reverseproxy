@@ -138,6 +138,7 @@ func (p *ProxyServer) establishGSConnection(client *ClientInfo) error {
 			return fmt.Errorf("failed to start new game server %w", err)
 		}
 	}
+	p.logger.Info("game server is ready")
 	gsKey := net.JoinHostPort(gsInfo.server.Host(), gsInfo.server.Port())
 	gsConn, err := net.Dial("tcp", gsKey)
 	if err != nil {
@@ -151,6 +152,8 @@ func (p *ProxyServer) establishGSConnection(client *ClientInfo) error {
 		gsConn.Close()
 		return fmt.Errorf("failed to send client auth to game server: %w", err)
 	}
+
+	// TODO: i want to auth at gs and return the ack only if it also passes, then we return to client not before from proxy
 
 	response, _, err := netutils.ReadMessage(gsConn, p.logger)
 	if err != nil || response != "AUTH_ACK" {
@@ -261,6 +264,7 @@ func (p *ProxyServer) findAvailableGameServer() *GameServerInfo {
 }
 
 func (p *ProxyServer) startNewGameServer() (*GameServerInfo, error) {
+	p.logger.Info("starting new game server")
 	port, err := p.getFreePort()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get free port: %w", err)

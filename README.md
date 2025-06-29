@@ -1,4 +1,6 @@
-# Reverse Proxy Idea (Primegean inspired)
+# Reverse Proxy
+
+This project serves mainly the goal to get to know a bit of golang.
 
 ## General
 
@@ -16,8 +18,8 @@ Connection can be closed from both sides
 
 ## Stuff to consider
 
-- TCP connections (handshake, packet format)
-    - Framing of messages as we want to use raw tcp
+- TCP connections
+    - Framing of messages
 - Filter bad actors (can be filtered by rules, but for now maybe just allow all)
 - Authentication (probably also allow everyone for now)
 - Server assignments
@@ -26,19 +28,11 @@ Connection can be closed from both sides
 
 Need simulation to test it
 
-## What i want to figure out
-
-- Do we actual need one Server and then seperate smaller game entities? GameServers in normal servers doesn't really make sense
-- Do we have proxy then the matchmaking servers (multiple), proxy keeps track of matchmaking servers and matchmaking servers have game servers
--> isnt that just 2 reverse proxies with load balancing?
-
-
 ## Start with
 - Just simple connection TCP (socket) client server with TCP 
 - Auth for clients
 - forward data to game server and send data back (some config)
-    - probably difficult as it required packet framing
-- database on proxy
+- store data on proxy
 
 ## What are we tackeling
 - Load balancing

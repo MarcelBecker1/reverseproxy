@@ -41,6 +41,10 @@ func (mr *MessageReader) Listen(ctx context.Context, msgChan chan string) {
 
 		msg, bytes, err := ReadMessage(mr.conn, mr.logger)
 		if err != nil {
+			if isConnectionClosed(err) {
+				mr.logger.Debug("connection closed during read", "error", err)
+				return
+			}
 			if err == io.EOF {
 				mr.logger.Info("connection disconnected", "error", err)
 			} else {

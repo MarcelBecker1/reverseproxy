@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"log/slog"
 	"net"
 )
@@ -39,8 +40,12 @@ func (s *TCPServer) Start(handler Handler) error {
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
-				s.logger.Error("failed to accept connection", "error", err)
-				continue // TODO: better handling of errors for permanent ones
+				if errors.Is(err, net.ErrClosed) {
+					s.logger.Error("listener closed, stopp accepting connections", "error", err)
+					return
+				}
+				s.logger.Warn("accept error, continuing", "error", err)
+				continue
 			}
 			go handler.HandleConnection(conn)
 		}

@@ -116,7 +116,8 @@ func (s *GameServer) startProxyCommunication() {
 				clientId = s.handleClientAuth(msg)
 				continue
 			}
-			if strings.HasSuffix(msg, "aborting connection") { // not optimal to look for this string -> change
+			// TODO: not optimal to look for this strings, should have better signaling here
+			if strings.HasSuffix(msg, "aborting connection") || strings.Contains(msg, "client connection closed") {
 				s.logger.Info("abort received for client", "clientId", clientId)
 				s.removeClient(clientId)
 				return

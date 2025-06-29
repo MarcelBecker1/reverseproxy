@@ -15,7 +15,7 @@ func ForwardMsg(conn net.Conn, msg string, timeout time.Duration, logger *slog.L
 	}
 
 	if err := SendMessage(conn, msg, logger); err != nil {
-		return fmt.Errorf("failed sending messages to gs %w", err)
+		return fmt.Errorf("failed sending message %w", err)
 	}
 
 	return nil
