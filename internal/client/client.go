@@ -28,6 +28,7 @@ type Client struct {
 	logger *slog.Logger
 }
 
+// TODO: think about client config
 type Config struct {
 	Name           string
 	ConnectTimeout time.Duration
@@ -38,6 +39,7 @@ type Config struct {
 func New(conf *Config) *Client {
 	log := logger.NewWithComponent("client")
 
+	// TODO: not sure about the timeouts
 	if conf.ConnectTimeout == 0 {
 		conf.ConnectTimeout = 30 * time.Second
 	}

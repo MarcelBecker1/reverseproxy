@@ -13,8 +13,10 @@ import (
 )
 
 /*
-	TODO:
-		Create some dummy data that we want to send back to clients
+	TODO: Create some dummy data that we want to send back to clients
+		-> also allows for less chatty logs
+
+	TODO: What we should do is keep some state that we can verify whether it works with the connections and sent messages
 */
 
 type GSClientInfo struct {
