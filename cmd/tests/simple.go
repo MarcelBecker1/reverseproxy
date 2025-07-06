@@ -1,4 +1,4 @@
-package main
+package tests
 
 import (
 	"log/slog"
@@ -73,11 +73,13 @@ func SimpleTest() {
 		time.Sleep(100 * time.Millisecond)
 		client.Send("Some test data")
 		client.Send("Something else")
-		time.Sleep(2 * time.Second)
+		time.Sleep(8 * time.Second)
+		client.Send("Another one")
+		time.Sleep(7 * time.Second)
 		client.Send("Last message")
 	}()
 
-	time.Sleep(5 * time.Second)
+	time.Sleep(20 * time.Second) // wait a bit longer to let the proxy make updates
 	client.Close()
 
 	sig := <-sigChan

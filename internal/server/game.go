@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net"
 	"strings"
@@ -29,8 +30,10 @@ type GameServer struct {
 	port        string
 	tcpServer   *TCPServer
 	proxyConn   net.Conn
+	capacity    uint16
 	connMgr     *netutils.Manager
 	clients     map[string]*GSClientInfo
+	msgCntr     uint16
 	timeout     time.Duration
 	authTimeout time.Duration
 	mu          *sync.Mutex
@@ -54,8 +57,10 @@ func NewGameServer(c *GameServerConfig) *GameServer {
 		host:        c.Host,
 		port:        c.Port,
 		tcpServer:   server,
+		capacity:    c.Capacity,
 		connMgr:     connMngr,
 		clients:     make(map[string]*GSClientInfo),
+		msgCntr:     0,
 		timeout:     c.Timeout,
 		authTimeout: authTimeout,
 		mu:          &sync.Mutex{},
@@ -125,15 +130,27 @@ func (s *GameServer) startProxyCommunication() {
 				return
 			}
 
-			s.handleClientMessage(msg)
+			s.handleClientMessage()
 		}
 	}
 }
 
 // TODO: add handling in error cases
-// for now we just send the same message back
-func (s *GameServer) handleClientMessage(msg string) {
-	if err := netutils.ForwardMsg(s.proxyConn, msg, s.timeout, s.logger); err != nil {
+// could add some more meaningful returns
+func (s *GameServer) handleClientMessage() {
+	s.mu.Lock()
+	s.msgCntr++
+	currMsgs := s.msgCntr
+	currClients := len(s.clients)
+	s.mu.Unlock()
+
+	response := fmt.Sprintf("GAME_STATE:players_%d,received_messages_%d,timestamp_%d",
+		currClients,
+		currMsgs,
+		time.Now().Unix(),
+	)
+
+	if err := netutils.ForwardMsg(s.proxyConn, response, s.timeout, s.logger); err != nil {
 		s.logger.Error("failed to forward to proxy", "error", err)
 	}
 }
@@ -184,6 +201,6 @@ func (s *GameServer) HasCapacity() bool {
 	return s.connMgr.HasCapacity()
 }
 
-func (s *GameServer) ConnectionCount() uint16 {
+func (s *GameServer) CurrentLoad() uint16 {
 	return s.connMgr.Count()
 }

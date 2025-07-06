@@ -1,4 +1,4 @@
-package main
+package tests
 
 import (
 	"fmt"
@@ -12,13 +12,10 @@ import (
 	"github.com/MarcelBecker1/reverseproxy/internal/server"
 )
 
-/*
-	1) Start proxy
-	2) spawn clients that connect to proxy
-	3) send data from clients periodically
-
-	Maybe have different bursts of connections
-*/
+type ErrorReport struct {
+	client int
+	err    error
+}
 
 const (
 	host           = "localhost"
@@ -38,9 +35,10 @@ func RunSimulation() {
 
 	// start proxy
 	proxyConfig := &server.ProxyServerConfig{
-		Host:    host,
-		Port:    port,
-		Timeout: defaultTimeout,
+		Host:         host,
+		Port:         port,
+		Timeout:      defaultTimeout,
+		DatabasePath: "./simulation_proxy.db",
 	}
 	proxy := server.NewProxyServer(proxyConfig)
 	errorChan := make(chan error, 1)
@@ -56,7 +54,6 @@ func RunSimulation() {
 
 func spawnClients(amount int) {
 	var wg sync.WaitGroup
-	// idk get something meaningful as config
 	conf := &client.Config{
 		Name: "John Smith",
 	}
@@ -89,11 +86,6 @@ func spawnClients(amount int) {
 	} else {
 		log.Info("finished with no client errors")
 	}
-}
-
-type ErrorReport struct {
-	client int
-	err    error
 }
 
 func (e ErrorReport) String() string {
@@ -131,3 +123,7 @@ func runClient(id int, conf *client.Config, r *rand.Rand) *ErrorReport {
 
 	return nil
 }
+
+// TODO: add simulation with assertions to verify correctness
+// TODO: add real simulation with more load
+// TODO: add fuzzy tests

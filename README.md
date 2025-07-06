@@ -1,39 +1,22 @@
 # Reverse Proxy
 
-This project serves mainly the goal to get to know a bit of golang.
+This project serves as a learning oppurtinity. I want to explore go, networking with go as well as some basic reverse proxy functionalities.
 
-## General
+## General Idea
 
-Client -> Reverse Proxy -> GameServer (actual resources)
+**Client -> Reverse Proxy -> Game Server (actual resources)**
 
-Client authenticates to proxy
+1. Client authenticates and authorizes to proxy
+2. Proxy finds server or starts new one if none of the existing ones have capacity
+3. Proxy forwards auth to game server
+4. Game server sends back success via proxy to client
+5. Proxy works as man in the middle and collects some data
+6. Connection can be closed from both sides
+7. Simulation for testing the functionalities with load and fuzzy testing
 
-Proxy finds server or starts new one (server selection)
+## What's Next
 
-Proxy forwards auth
+- Currently we only have very simple working simulations
+- We need to implement more sophisticated tests and fuzzy testing
+- Already added outline of state loading on which we can build on for more interesting tests
 
-Server can send stuff (config) back to client via proxy
-
-Connection can be closed from both sides
-
-## Stuff to consider
-
-- TCP connections
-    - Framing of messages
-- Filter bad actors (can be filtered by rules, but for now maybe just allow all)
-- Authentication (probably also allow everyone for now)
-- Server assignments
-    - How do we keep track of servers? SQLite? Something simpler?
-- What if Client closes connection -> Server should close connection
-
-Need simulation to test it
-
-## Start with
-- Just simple connection TCP (socket) client server with TCP 
-- Auth for clients
-- forward data to game server and send data back (some config)
-- store data on proxy
-
-## What are we tackeling
-- Load balancing
-- Protection from attacks?

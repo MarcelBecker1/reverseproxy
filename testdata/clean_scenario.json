@@ -1,0 +1,7 @@
+{
+  "name": "clean_scenario",
+  "description": "Clean start with no clients nor game servers",
+  "game_servers": [],
+  "clients": [],
+  "sessions": []
+}
