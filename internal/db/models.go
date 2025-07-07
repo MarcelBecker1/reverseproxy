@@ -4,8 +4,10 @@ import (
 	"time"
 )
 
+// TODO: generally update models and repos, remove some unnecessary fields
 // TODO: update my entities to support different statuses
 
+// Represents a game server connection in the database
 type DBGameServer struct {
 	ID          int       `json:"id"`
 	Host        string    `json:"host"`
@@ -15,10 +17,9 @@ type DBGameServer struct {
 	Status      string    `json:"status"` // "running", "stopped", "error"
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
-	LastPing    time.Time `json:"last_ping"`
 }
 
-// DBClient represents a client connection in the database
+// Represents a client connection in the database
 type DBClient struct {
 	ID            string    `json:"id"`
 	GameServerID  *int      `json:"game_server_id,omitempty"`
@@ -30,7 +31,7 @@ type DBClient struct {
 	Authenticated bool      `json:"authenticated"`
 }
 
-// DBProxySession represents an active proxy session
+// Represents an active proxy session
 type DBProxySession struct {
 	ID           int        `json:"id"`
 	ClientID     string     `json:"client_id"`
@@ -44,7 +45,7 @@ type DBProxySession struct {
 	MessagesDown int64      `json:"messages_down"`
 }
 
-// DBProxyStats represents overall proxy statistics
+// Represents overall proxy statistics
 type DBProxyStats struct {
 	TotalConnections  int64     `json:"total_connections"`
 	ActiveConnections int       `json:"active_connections"`

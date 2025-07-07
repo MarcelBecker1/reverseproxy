@@ -79,7 +79,7 @@ func SimpleTest() {
 		client.Send("Last message")
 	}()
 
-	time.Sleep(20 * time.Second) // wait a bit longer to let the proxy make updates
+	time.Sleep(5 * time.Second)
 	client.Close()
 
 	sig := <-sigChan

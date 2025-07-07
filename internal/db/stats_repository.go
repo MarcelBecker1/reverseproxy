@@ -96,31 +96,26 @@ func (r *StatsRepository) UpdateTrafficStats(bytesUp, bytesDown, messagesUp, mes
 }
 
 func (r *StatsRepository) RefreshStats() error {
-	// Get current active connections
 	activeConnections, err := r.getActiveConnectionsCount()
 	if err != nil {
 		return fmt.Errorf("failed to get active connections count: %w", err)
 	}
 
-	// Get current active game servers
 	activeGameServers, err := r.getActiveGameServersCount()
 	if err != nil {
 		return fmt.Errorf("failed to get active game servers count: %w", err)
 	}
 
-	// Get total game servers
 	totalGameServers, err := r.getTotalGameServersCount()
 	if err != nil {
 		return fmt.Errorf("failed to get total game servers count: %w", err)
 	}
 
-	// Get traffic stats
 	bytesUp, bytesDown, messagesUp, messagesDown, err := r.getTrafficStats()
 	if err != nil {
 		return fmt.Errorf("failed to get traffic stats: %w", err)
 	}
 
-	// Update all stats
 	query := `UPDATE proxy_stats 
               SET active_connections = ?, active_game_servers = ?, total_game_servers = ?,
                   total_bytes_up = ?, total_bytes_down = ?, total_messages_up = ?, total_messages_down = ?

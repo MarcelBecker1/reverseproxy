@@ -77,7 +77,6 @@ func (sm *StateManager) CreateClient(clientID, remoteAddr string) error {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
 
-	// Increment total connections
 	if err := sm.statsRepo.IncrementTotalConnections(); err != nil {
 		sm.logger.Error("failed to increment total connections", "error", err)
 	}
@@ -234,7 +233,6 @@ func (sm *StateManager) RefreshStats() error {
 	return sm.statsRepo.RefreshStats()
 }
 
-// State introspection and management for testing
 func (sm *StateManager) GetFullState() (*ProxyState, error) {
 	clients, err := sm.clientRepo.GetAll()
 	if err != nil {

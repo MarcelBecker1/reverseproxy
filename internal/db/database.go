@@ -8,7 +8,9 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// RetryDBOperation executes a database operation with retry logic for SQLITE_BUSY errors
+// TODO: add retry to logic to other repos
+
+// Executes a database operation with retry logic for SQLITE_BUSY errors
 func RetryDBOperation(operation func() error, maxRetries int, retryDelay time.Duration) error {
 	var err error
 	for i := 0; i <= maxRetries; i++ {
@@ -17,7 +19,6 @@ func RetryDBOperation(operation func() error, maxRetries int, retryDelay time.Du
 			return nil
 		}
 
-		// Check if it's a SQLITE_BUSY error
 		if i < maxRetries && (err.Error() == "database is locked (5) (SQLITE_BUSY)" ||
 			err.Error() == "database is locked" ||
 			err.Error() == "database is busy") {
@@ -128,19 +129,16 @@ func NewDatabase(dbPath string) (*Database, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Configure connection pool for better concurrency
 	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(time.Hour)
 
-	// Test the connection
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
 	database := &Database{db: db}
 
-	// Initialize schema
 	if err := database.initSchema(); err != nil {
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
 	}
@@ -160,21 +158,15 @@ func (d *Database) Close() error {
 	return d.db.Close()
 }
 
-func (d *Database) GetDB() *sql.DB {
-	return d.db
-}
-
-// Health check for the database
 func (d *Database) HealthCheck() error {
 	return d.db.Ping()
 }
 
-// Begin a transaction
 func (d *Database) BeginTx() (*sql.Tx, error) {
 	return d.db.Begin()
 }
 
-// Clear all data (useful for testing)
+// Useful for testing
 func (d *Database) ClearAll() error {
 	tx, err := d.BeginTx()
 	if err != nil {
@@ -189,7 +181,6 @@ func (d *Database) ClearAll() error {
 		}
 	}
 
-	// Reset stats
 	if _, err := tx.Exec(`UPDATE proxy_stats SET 
 		total_connections = 0,
 		active_connections = 0,
@@ -205,9 +196,4 @@ func (d *Database) ClearAll() error {
 	}
 
 	return tx.Commit()
-}
-
-// Get current timestamp in the format expected by SQLite
-func (d *Database) Now() string {
-	return time.Now().Format("2006-01-02 15:04:05")
 }

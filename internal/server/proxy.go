@@ -455,10 +455,6 @@ func (p *ProxyServer) GetGameServers() ([]*db.DBGameServer, error) {
 	return p.stateManager.GetAllGameServers()
 }
 
-func (p *ProxyServer) ClearState() error {
-	return p.stateManager.ClearAllState()
-}
-
 func (p *ProxyServer) RefreshStats() error {
 	return p.stateManager.RefreshStats()
 }
