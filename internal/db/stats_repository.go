@@ -21,7 +21,7 @@ func (r *StatsRepository) GetStats() (*DBProxyStats, error) {
 	err := r.db.db.QueryRow(query).Scan(
 		&stats.TotalConnections, &stats.ActiveConnections, &stats.ActiveGameServers, &stats.TotalGameServers,
 		&stats.TotalBytesUp, &stats.TotalBytesDown, &stats.TotalMessagesUp, &stats.TotalMessagesDown,
-		&stats.LastUpdated,
+		&stats.UpdatedAt,
 	)
 
 	if err != nil {

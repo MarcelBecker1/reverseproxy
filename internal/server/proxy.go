@@ -245,6 +245,8 @@ func (p *ProxyServer) establishGSConnection(client *ClientInfo) error {
 	return nil
 }
 
+// TODO: this is difficult with error states of the game servers
+// we need some feedback from the gs on which we would set it to error in proxy (or on certain errors, e.g. timeouts)
 func (p *ProxyServer) startBidirectionalProxy(client *ClientInfo) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -313,6 +315,7 @@ func (p *ProxyServer) updateTrafficBatched(client *ClientInfo, bytesUp, bytesDow
 // Currently pretty much the same but they might diverge more so we keep them as 2 seperate functions for now
 
 func (p *ProxyServer) handleClientCommunication(ctx context.Context, client *ClientInfo) {
+	// TODO: What am i doing here? I pass length 10 string chan to the function that dynamically loads messages from the stream depending on the size ??
 	clientMsgChan := make(chan string, 10)
 	go netutils.ListenForMessages(ctx, client.conn, clientMsgChan, p.timeout, p.logger)
 
@@ -470,7 +473,6 @@ func (p *ProxyServer) startDBWorkers() {
 	}
 }
 
-// TODO: stat updating not working as i want it
 func (p *ProxyServer) dbUpdateWorker() {
 	defer p.dbWorkerWg.Done()
 

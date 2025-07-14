@@ -19,6 +19,7 @@ type TestData struct {
 	Sessions    []TestSession    `json:"sessions,omitempty"`
 }
 
+// TODO: just use the DB instances
 type TestGameServer struct {
 	Host        string `json:"host"`
 	Port        string `json:"port"`

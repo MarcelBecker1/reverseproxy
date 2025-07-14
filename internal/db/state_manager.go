@@ -84,10 +84,6 @@ func (sm *StateManager) CreateClient(clientID, remoteAddr string) error {
 	return nil
 }
 
-func (sm *StateManager) GetClient(clientID string) (*DBClient, error) {
-	return sm.clientRepo.GetByID(clientID)
-}
-
 func (sm *StateManager) UpdateClientStatus(clientID, status string) error {
 	return sm.clientRepo.UpdateStatus(clientID, status)
 }
@@ -209,7 +205,10 @@ func (sm *StateManager) GetProxySessionByClient(clientID string) (*DBProxySessio
 }
 
 func (sm *StateManager) UpdateProxySessionTraffic(id int, bytesUp, bytesDown, messagesUp, messagesDown int64) error {
-	return sm.proxySessionRepo.UpdateTraffic(id, bytesUp, bytesDown, messagesUp, messagesDown)
+	if err := sm.proxySessionRepo.UpdateTraffic(id, bytesUp, bytesDown, messagesUp, messagesDown); err != nil {
+		return err
+	}
+	return sm.statsRepo.UpdateTrafficStats(bytesUp, bytesDown, messagesUp, messagesDown)
 }
 
 func (sm *StateManager) EndProxySession(id int, status string) error {
